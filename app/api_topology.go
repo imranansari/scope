@@ -36,13 +36,14 @@ func handleTopology(ctx context.Context, renderer render.Renderer, decorator ren
 }
 
 // Individual nodes.
-func handleNode(ctx context.Context, renderer render.Renderer, _ render.Decorator, report report.Report, w http.ResponseWriter, r *http.Request) {
+func handleNode(ctx context.Context, renderer render.Renderer, decorator render.Decorator, report report.Report, w http.ResponseWriter, r *http.Request) {
 	var (
-		vars       = mux.Vars(r)
-		topologyID = vars["topology"]
-		nodeID     = vars["id"]
-		rendered   = renderer.Render(report, nil)
-		node, ok   = rendered[nodeID]
+		vars             = mux.Vars(r)
+		topologyID       = vars["topology"]
+		nodeID           = vars["id"]
+		preciousRenderer = render.PreciousNodeRenderer{PreciousNodeID: nodeID, Renderer: renderer}
+		rendered         = preciousRenderer.Render(report, decorator)
+		node, ok         = rendered[nodeID]
 	)
 	if !ok {
 		http.NotFound(w, r)
@@ -83,7 +84,7 @@ func handleWebsocket(
 		for { // just discard everything the browser sends
 			if _, _, err := c.ReadMessage(); err != nil {
 				if !xfer.IsExpectedWSCloseError(err) {
-					log.Println("err:", err)
+					log.Error("err:", err)
 				}
 				close(quit)
 				break
@@ -106,7 +107,7 @@ func handleWebsocket(
 			log.Errorf("Error generating report: %v", err)
 			return
 		}
-		renderer, decorator, err := topologyRegistry.rendererForTopology(topologyID, r.Form, report)
+		renderer, decorator, err := topologyRegistry.RendererForTopology(topologyID, r.Form, report)
 		if err != nil {
 			log.Errorf("Error generating report: %v", err)
 			return

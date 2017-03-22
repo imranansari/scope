@@ -1,22 +1,15 @@
-jest.dontMock('../../utils/router-utils');
-jest.dontMock('../../utils/search-utils');
-jest.dontMock('../../utils/string-utils');
-jest.dontMock('../../utils/topology-utils');
-jest.dontMock('../../utils/network-view-utils');
-jest.dontMock('../../constants/action-types');
-jest.dontMock('../root');
-
-const is = require('immutable').is;
-
+import {is, fromJS} from 'immutable';
 // Root reducer test suite using Jasmine matchers
+import { constructEdgeId } from '../../utils/layouter-utils';
 
 describe('RootReducer', () => {
   const ActionTypes = require('../../constants/action-types').default;
   const reducer = require('../root').default;
   const initialState = require('../root').initialState;
   const topologyUtils = require('../../utils/topology-utils');
+  const topologySelectors = require('../../selectors/topology');
   // TODO maybe extract those to topology-utils tests?
-  const getActiveTopologyOptions = topologyUtils.getActiveTopologyOptions;
+  const activeTopologyOptionsSelector = topologySelectors.activeTopologyOptionsSelector;
   const getAdjacentNodes = topologyUtils.getAdjacentNodes;
   const isTopologyEmpty = topologyUtils.isTopologyEmpty;
   const getUrlState = require('../../utils/router-utils').getUrlState;
@@ -30,7 +23,7 @@ describe('RootReducer', () => {
       adjacency: ['n1', 'n2'],
       pseudo: undefined,
       label: undefined,
-      label_minor: undefined,
+      labelMinor: undefined,
       filtered: false,
       metrics: undefined,
       node_count: undefined,
@@ -43,7 +36,7 @@ describe('RootReducer', () => {
       adjacency: undefined,
       pseudo: undefined,
       label: undefined,
-      label_minor: undefined,
+      labelMinor: undefined,
       filtered: false,
       metrics: undefined,
       node_count: undefined,
@@ -51,6 +44,34 @@ describe('RootReducer', () => {
       stack: undefined
     }
   };
+
+  const topologies = [{
+    hide_if_empty: true,
+    name: 'Processes',
+    rank: 1,
+    sub_topologies: [],
+    url: '/api/topology/processes',
+    fullName: 'Processes',
+    id: 'processes',
+    options: [
+      {
+        defaultValue: 'hide',
+        id: 'unconnected',
+        options: [
+          {
+            label: 'Unconnected nodes hidden',
+            value: 'hide'
+          }
+        ]
+      }
+    ],
+    stats: {
+      edge_count: 379,
+      filtered_nodes: 214,
+      node_count: 320,
+      nonpseudo_node_count: 320
+    }
+  }];
 
   // actions
 
@@ -173,6 +194,10 @@ describe('RootReducer', () => {
     state: {}
   };
 
+  const ChangeInstanceAction = {
+    type: ActionTypes.CHANGE_INSTANCE
+  };
+
   // Basic tests
 
   it('returns initial state', () => {
@@ -218,28 +243,28 @@ describe('RootReducer', () => {
     nextState = reducer(nextState, ClickTopologyAction);
 
     // default options
-    expect(getActiveTopologyOptions(nextState).has('option1')).toBeTruthy();
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('off');
+    expect(activeTopologyOptionsSelector(nextState).has('option1')).toBeTruthy();
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('off');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('off');
 
     // turn on
     nextState = reducer(nextState, ChangeTopologyOptionAction);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('on');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('on');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('on');
 
     // turn off
     nextState = reducer(nextState, ChangeTopologyOptionAction2);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('off');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('off');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('off');
 
     // sub-topology should retain main topo options
     nextState = reducer(nextState, ClickSubTopologyAction);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('off');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('off');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('off');
 
     // other topology w/o options dont return options, but keep in app state
     nextState = reducer(nextState, ClickTopology2Action);
-    expect(getActiveTopologyOptions(nextState)).toBeUndefined();
+    expect(activeTopologyOptionsSelector(nextState)).toBeUndefined();
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('off');
   });
 
@@ -251,13 +276,13 @@ describe('RootReducer', () => {
 
     let nextState = initialState;
     nextState = reducer(nextState, RouteAction);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('on');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('on');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('on');
 
     // stay same after topos have been received
     nextState = reducer(nextState, ReceiveTopologiesAction);
     nextState = reducer(nextState, ClickTopologyAction);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('on');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('on');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('on');
   });
 
@@ -270,7 +295,7 @@ describe('RootReducer', () => {
     nextState = reducer(nextState, RouteAction);
     nextState = reducer(nextState, ReceiveTopologiesAction);
     nextState = reducer(nextState, ClickTopologyAction);
-    expect(getActiveTopologyOptions(nextState).get('option1')).toBe('off');
+    expect(activeTopologyOptionsSelector(nextState).get('option1')).toBe('off');
     expect(getUrlState(nextState).topologyOptions.topo1.option1).toBe('off');
   });
 
@@ -470,5 +495,61 @@ describe('RootReducer', () => {
     expect(nextState.get('nodeDetails').keySeq().last()).toEqual('rel1');
     expect(nextState.get('nodeDetails').size).toEqual(1);
     expect(nextState.get('currentTopology').get('name')).toBe('Topo2');
+  });
+  it('closes the help dialog if the canvas is clicked', () => {
+    let nextState = initialState.set('showingHelp', true);
+    nextState = reducer(nextState, { type: ActionTypes.CLICK_BACKGROUND });
+    expect(nextState.get('showingHelp')).toBe(false);
+  });
+  it('switches to grid mode when complexity is high', () => {
+    let nextState = initialState.set('currentTopology', fromJS(topologies[0]));
+    nextState = reducer(nextState, {type: ActionTypes.SET_RECEIVED_NODES_DELTA});
+    expect(nextState.get('gridMode')).toBe(true);
+    expect(nextState.get('initialNodesLoaded')).toBe(true);
+  });
+  it('cleans up old adjacencies', () => {
+    // Add some nodes
+    const action1 = {
+      type: ActionTypes.RECEIVE_NODES_DELTA,
+      delta: { add: [{ id: 'n1' }, { id: 'n2' }] }
+    };
+    // Show nodes as connected
+    const action2 = {
+      type: ActionTypes.RECEIVE_NODES_DELTA,
+      delta: {
+        update: [{ id: 'n1', adjacency: ['n2'] }]
+      }
+    };
+    // Remove the connection
+    const action3 = {
+      type: ActionTypes.RECEIVE_NODES_DELTA,
+      delta: {
+        update: [{ id: 'n1' }]
+      }
+    };
+    let nextState = reducer(initialState, action1);
+    nextState = reducer(nextState, action2);
+    nextState = reducer(nextState, action3);
+    expect(nextState.getIn(['nodes', 'n1', 'adjacency'])).toBeFalsy();
+  });
+  it('removes non-transferrable state values when changing instances', () => {
+    let nextState = initialState;
+    nextState = reducer(nextState, ClickNodeAction);
+    expect(nextState.get('selectedNodeId')).toEqual('n1');
+    expect(nextState.getIn(['nodeDetails', 'n1'])).toBeTruthy();
+    nextState = reducer(nextState, ChangeInstanceAction);
+    expect(nextState.get('selectedNodeId')).toBeFalsy();
+    expect(nextState.getIn(['nodeDetails', 'n1'])).toBeFalsy();
+  });
+  it('highlights bidirectional edges', () => {
+    const action = {
+      type: ActionTypes.ENTER_EDGE,
+      edgeId: constructEdgeId('abc123', 'def456')
+    };
+    const nextState = reducer(initialState, action);
+    expect(nextState.get('highlightedEdgeIds').toJS()).toEqual([
+      constructEdgeId('abc123', 'def456'),
+      constructEdgeId('def456', 'abc123')
+    ]);
   });
 });

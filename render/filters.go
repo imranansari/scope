@@ -3,12 +3,36 @@ package render
 import (
 	"strings"
 
-	"github.com/weaveworks/scope/common/mtime"
+	"github.com/weaveworks/common/mtime"
 	"github.com/weaveworks/scope/probe/docker"
 	"github.com/weaveworks/scope/probe/endpoint"
 	"github.com/weaveworks/scope/probe/kubernetes"
 	"github.com/weaveworks/scope/report"
 )
+
+// PreciousNodeRenderer ensures a node is never filtered out by decorators
+type PreciousNodeRenderer struct {
+	PreciousNodeID string
+	Renderer
+}
+
+// Render implements Renderer
+func (p PreciousNodeRenderer) Render(rpt report.Report, dct Decorator) report.Nodes {
+	undecoratedNodes := p.Renderer.Render(rpt, nil)
+	preciousNode, foundBeforeDecoration := undecoratedNodes[p.PreciousNodeID]
+	finalNodes := applyDecorator{ConstantRenderer(undecoratedNodes)}.Render(rpt, dct)
+	if _, ok := finalNodes[p.PreciousNodeID]; !ok && foundBeforeDecoration {
+		finalNodes[p.PreciousNodeID] = preciousNode
+	}
+	return finalNodes
+}
+
+// Stats implements Renderer
+func (p PreciousNodeRenderer) Stats(rpt report.Report, dct Decorator) Stats {
+	// default to the underlying renderer
+	// TODO: we don't take into account the precious node, so we may be off by one
+	return p.Renderer.Stats(rpt, dct)
+}
 
 // CustomRenderer allow for mapping functions that received the entire topology
 // in one call - useful for functions that need to consider the entire graph.
@@ -57,6 +81,18 @@ func ColorConnected(r Renderer) Renderer {
 
 // FilterFunc is the function type used by Filters
 type FilterFunc func(report.Node) bool
+
+// AnyFilterFunc checks if any of the filterfuncs matches.
+func AnyFilterFunc(fs ...FilterFunc) FilterFunc {
+	return func(n report.Node) bool {
+		for _, f := range fs {
+			if f(n) {
+				return true
+			}
+		}
+		return false
+	}
+}
 
 // ComposeFilterFuncs composes filterfuncs into a single FilterFunc checking all.
 func ComposeFilterFuncs(fs ...FilterFunc) FilterFunc {
@@ -200,15 +236,30 @@ func IsRunning(n report.Node) bool {
 // IsStopped checks if the node is *not* a running docker container
 var IsStopped = Complement(IsRunning)
 
+func nonProcspiedFilter(node report.Node) bool {
+	_, ok := node.Latest.Lookup(endpoint.Procspied)
+	return ok
+}
+
+func nonEBPFFilter(node report.Node) bool {
+	_, ok := node.Latest.Lookup(endpoint.EBPF)
+	return ok
+}
+
 // FilterNonProcspied removes endpoints which were not found in procspy.
 func FilterNonProcspied(r Renderer) Renderer {
-	return MakeFilter(
-		func(node report.Node) bool {
-			_, ok := node.Latest.Lookup(endpoint.Procspied)
-			return ok
-		},
-		r,
-	)
+	return MakeFilter(nonProcspiedFilter, r)
+}
+
+// FilterNonEBPF removes endpoints which were not found via eBPF.
+func FilterNonEBPF(r Renderer) Renderer {
+	return MakeFilter(nonEBPFFilter, r)
+}
+
+// FilterNonProcspiedNorEBPF removes endpoints which were not found in procspy
+// nor via eBPF.
+func FilterNonProcspiedNorEBPF(r Renderer) Renderer {
+	return MakeFilter(AnyFilterFunc(nonProcspiedFilter, nonEBPFFilter), r)
 }
 
 // IsApplication checks if the node is an "application" node
@@ -244,10 +295,26 @@ func IsApplication(n report.Node) bool {
 // IsSystem checks if the node is a "system" node
 var IsSystem = Complement(IsApplication)
 
+// HasLabel checks if the node has the desired docker label
+func HasLabel(labelKey string, labelValue string) FilterFunc {
+	return func(n report.Node) bool {
+		value, _ := n.Latest.Lookup(docker.LabelPrefix + labelKey)
+		if value == labelValue {
+			return true
+		}
+		return false
+	}
+}
+
+// DoesNotHaveLabel checks if the node does NOT have the specified docker label
+func DoesNotHaveLabel(labelKey string, labelValue string) FilterFunc {
+	return Complement(HasLabel(labelKey, labelValue))
+}
+
 // IsNotPseudo returns true if the node is not a pseudo node
-// or the internet nodes.
+// or internet/service nodes.
 func IsNotPseudo(n report.Node) bool {
-	return n.Topology != Pseudo || strings.HasSuffix(n.ID, TheInternetID)
+	return n.Topology != Pseudo || strings.HasSuffix(n.ID, TheInternetID) || strings.HasPrefix(n.ID, ServiceNodeIDPrefix)
 }
 
 // IsNamespace checks if the node is a pod/service in the specified namespace

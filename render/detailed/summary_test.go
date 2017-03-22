@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weaveworks/scope/common/mtime"
+	"github.com/weaveworks/common/mtime"
+	"github.com/weaveworks/common/test"
 	"github.com/weaveworks/scope/probe/docker"
 	"github.com/weaveworks/scope/probe/host"
 	"github.com/weaveworks/scope/probe/process"
@@ -13,7 +14,6 @@ import (
 	"github.com/weaveworks/scope/render/detailed"
 	"github.com/weaveworks/scope/render/expected"
 	"github.com/weaveworks/scope/report"
-	"github.com/weaveworks/scope/test"
 	"github.com/weaveworks/scope/test/fixture"
 	"github.com/weaveworks/scope/test/reflect"
 )
@@ -47,7 +47,7 @@ func TestSummaries(t *testing.T) {
 	// It should summarize nodes' metrics
 	{
 		t1, t2 := mtime.Now().Add(-1*time.Minute), mtime.Now()
-		metric := report.MakeMetric([]report.Sample{{t1, 1}, {t2, 2}})
+		metric := report.MakeMetric([]report.Sample{{Timestamp: t1, Value: 1}, {Timestamp: t2, Value: 2}})
 		input := fixture.Report.Copy()
 
 		input.Process.Nodes[fixture.ClientProcess1NodeID].Metrics[process.CPUUsage] = metric
@@ -127,7 +127,8 @@ func TestMakeNodeSummary(t *testing.T) {
 				Shape:      "hexagon",
 				Linkable:   true,
 				Metadata: []report.MetadataRow{
-					{ID: docker.ContainerID, Label: "ID", Value: fixture.ClientContainerID, Priority: 1},
+					{ID: docker.ImageName, Label: "Image", Value: fixture.ClientContainerImageName, Priority: 1},
+					{ID: docker.ContainerID, Label: "ID", Value: fixture.ClientContainerID, Priority: 10, Truncate: 12},
 				},
 				Adjacency: report.MakeIDList(fixture.ServerContainerNodeID),
 			},

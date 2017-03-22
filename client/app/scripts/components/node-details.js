@@ -1,27 +1,33 @@
+import debug from 'debug';
 import React from 'react';
+import classNames from 'classnames';
 import { connect } from 'react-redux';
 import { Map as makeMap } from 'immutable';
 
 import { clickCloseDetails, clickShowTopologyForNode } from '../actions/app-actions';
 import { brightenColor, getNeutralColor, getNodeColorDark } from '../utils/color-utils';
+import { isGenericTable, isPropertyList } from '../utils/node-details-utils';
 import { resetDocumentTitle, setDocumentTitle } from '../utils/title-utils';
 
 import MatchedText from './matched-text';
 import NodeDetailsControls from './node-details/node-details-controls';
+import NodeDetailsGenericTable from './node-details/node-details-generic-table';
+import NodeDetailsPropertyList from './node-details/node-details-property-list';
 import NodeDetailsHealth from './node-details/node-details-health';
 import NodeDetailsInfo from './node-details/node-details-info';
-import NodeDetailsLabels from './node-details/node-details-labels';
 import NodeDetailsRelatives from './node-details/node-details-relatives';
 import NodeDetailsTable from './node-details/node-details-table';
 import Warning from './warning';
+
+
+const log = debug('scope:node-details');
 
 function getTruncationText(count) {
   return 'This section was too long to be handled efficiently and has been truncated'
   + ` (${count} extra entries not included). We are working to remove this limitation.`;
 }
 
-export class NodeDetails extends React.Component {
-
+class NodeDetails extends React.Component {
   constructor(props, context) {
     super(props, context);
     this.handleClickClose = this.handleClickClose.bind(this);
@@ -53,8 +59,12 @@ export class NodeDetails extends React.Component {
     return (
       <div className="node-details-tools-wrapper">
         <div className="node-details-tools">
-          {showSwitchTopology && <span title={topologyTitle}
-            className="fa fa-exchange" onClick={this.handleShowTopologyForNode} />}
+          {showSwitchTopology && <span
+            title={topologyTitle}
+            className="fa fa-long-arrow-left"
+            onClick={this.handleShowTopologyForNode}>
+            <span>Show in <span>{this.props.topologyId.replace(/-/g, ' ')}</span></span>
+          </span>}
           <span title="Close details" className="fa fa-close" onClick={this.handleClickClose} />
         </div>
       </div>
@@ -64,6 +74,10 @@ export class NodeDetails extends React.Component {
   renderLoading() {
     const node = this.props.nodes.get(this.props.nodeId);
     const label = node ? node.get('label') : this.props.label;
+    // NOTE: If we start the fa-spin animation before the node details panel has been
+    // mounted, the spinner is displayed blurred the whole time in Chrome (possibly
+    // caused by a bug having to do with animating the details panel).
+    const spinnerClassName = classNames('fa fa-circle-o-notch', { 'fa-spin': this.props.mounted });
     const nodeColor = (node ?
                        getNodeColorDark(node.get('rank'), label, node.get('pseudo')) :
                        getNeutralColor());
@@ -89,7 +103,7 @@ export class NodeDetails extends React.Component {
         </div>
         <div className="node-details-content">
           <div className="node-details-content-loading">
-            <span className="fa fa-circle-o-notch fa-spin" />
+            <span className={spinnerClassName} />
           </div>
         </div>
       </div>
@@ -166,7 +180,8 @@ export class NodeDetails extends React.Component {
         </div>
 
         {showControls && <div className="node-details-controls-wrapper" style={styles.controls}>
-          <NodeDetailsControls nodeId={this.props.nodeId}
+          <NodeDetailsControls
+            nodeId={this.props.nodeId}
             controls={details.controls}
             pending={pending}
             error={error} />
@@ -182,32 +197,34 @@ export class NodeDetails extends React.Component {
             <NodeDetailsInfo rows={details.metadata} matches={nodeMatches.get('metadata')} />
           </div>}
 
-          {details.connections && details.connections.map(connections => <div
-            className="node-details-content-section" key={connections.id}>
-              <NodeDetailsTable {...connections} nodes={connections.connections}
-                nodeIdKey="nodeId" />
+          {details.connections && details.connections.map(connections => (
+            <div className="node-details-content-section" key={connections.id}>
+              <NodeDetailsTable
+                {...connections}
+                nodes={connections.connections}
+                nodeIdKey="nodeId"
+              />
             </div>
-          )}
+          ))}
 
-          {details.children && details.children.map(children => <div
-            className="node-details-content-section" key={children.topologyId}>
+          {details.children && details.children.map(children => (
+            <div className="node-details-content-section" key={children.topologyId}>
               <NodeDetailsTable {...children} />
             </div>
-          )}
+          ))}
 
-          {details.tables && details.tables.length > 0 && details.tables.map(table => {
+          {details.tables && details.tables.length > 0 && details.tables.map((table) => {
             if (table.rows.length > 0) {
               return (
                 <div className="node-details-content-section" key={table.id}>
                   <div className="node-details-content-section-header">
-                    {table.label}
+                    {table.label && table.label.length > 0 && table.label}
                     {table.truncationCount > 0 && <span
                       className="node-details-content-section-header-warning">
                       <Warning text={getTruncationText(table.truncationCount)} />
                     </span>}
                   </div>
-                  <NodeDetailsLabels rows={table.rows}
-                    matches={nodeMatches.get('tables')} />
+                  {this.renderTable(table)}
                 </div>
               );
             }
@@ -216,6 +233,29 @@ export class NodeDetails extends React.Component {
         </div>
       </div>
     );
+  }
+
+  renderTable(table) {
+    const { nodeMatches = makeMap() } = this.props;
+
+    if (isGenericTable(table)) {
+      return (
+        <NodeDetailsGenericTable
+          rows={table.rows} columns={table.columns}
+          matches={nodeMatches.get('tables')}
+        />
+      );
+    } else if (isPropertyList(table)) {
+      return (
+        <NodeDetailsPropertyList
+          rows={table.rows} controls={table.controls}
+          matches={nodeMatches.get('property-lists')}
+        />
+      );
+    }
+
+    log(`Undefined type '${table.type}' for table ${table.id}`);
+    return null;
   }
 
   componentDidUpdate() {

@@ -5,12 +5,25 @@ import { saveGraph } from '../utils/file-utils';
 import { modulo } from '../utils/math-utils';
 import { updateRoute } from '../utils/router-utils';
 import { parseQuery } from '../utils/search-utils';
-import { bufferDeltaUpdate, resumeUpdate,
-  resetUpdateBuffer } from '../utils/update-buffer-utils';
-import { doControlRequest, getAllNodes, getNodesDelta, getNodeDetails,
-  getTopologies, deletePipe } from '../utils/web-api-utils';
-import { getActiveTopologyOptions,
-  getCurrentTopologyUrl } from '../utils/topology-utils';
+import {
+  bufferDeltaUpdate,
+  resumeUpdate,
+  resetUpdateBuffer,
+} from '../utils/update-buffer-utils';
+import {
+  doControlRequest,
+  getAllNodes,
+  getNodesDelta,
+  getNodeDetails,
+  getTopologies,
+  deletePipe,
+  stopPolling,
+  teardownWebsockets,
+} from '../utils/web-api-utils';
+import { getCurrentTopologyUrl } from '../utils/topology-utils';
+import { storageSet } from '../utils/storage-utils';
+import { loadTheme } from '../utils/contrast-utils';
+import { activeTopologyOptionsSelector } from '../selectors/topology';
 
 const log = debug('scope:app-actions');
 
@@ -35,11 +48,12 @@ export function toggleHelp() {
 }
 
 
-export function sortOrderChanged(sortBy, sortedDesc) {
+export function sortOrderChanged(sortedBy, sortedDesc) {
   return (dispatch, getState) => {
     dispatch({
       type: ActionTypes.SORT_ORDER_CHANGED,
-      sortBy, sortedDesc
+      sortedBy,
+      sortedDesc
     });
     updateRoute(getState);
   };
@@ -162,14 +176,16 @@ export function changeTopologyOption(option, value, topologyId) {
     // update all request workers with new options
     resetUpdateBuffer();
     const state = getState();
-    getTopologies(getActiveTopologyOptions(state), dispatch);
+    getTopologies(activeTopologyOptionsSelector(state), dispatch);
     getNodesDelta(
       getCurrentTopologyUrl(state),
-      getActiveTopologyOptions(state),
+      activeTopologyOptionsSelector(state),
       dispatch
     );
     getNodeDetails(
       state.get('topologyUrlsById'),
+      state.get('currentTopologyId'),
+      activeTopologyOptionsSelector(state),
       state.get('nodeDetails'),
       dispatch
     );
@@ -232,6 +248,12 @@ export function clickForceRelayout() {
   };
 }
 
+export function setViewportDimensions(width, height) {
+  return (dispatch) => {
+    dispatch({ type: ActionTypes.SET_VIEWPORT_DIMENSIONS, width, height });
+  };
+}
+
 export function toggleGridMode(enabledArgument) {
   return (dispatch, getState) => {
     const enabled = (enabledArgument === undefined) ?
@@ -242,9 +264,6 @@ export function toggleGridMode(enabledArgument) {
       enabled
     });
     updateRoute(getState);
-    if (!enabled) {
-      dispatch(clickForceRelayout());
-    }
   };
 }
 
@@ -260,6 +279,8 @@ export function clickNode(nodeId, label, origin) {
     const state = getState();
     getNodeDetails(
       state.get('topologyUrlsById'),
+      state.get('currentTopologyId'),
+      activeTopologyOptionsSelector(state),
       state.get('nodeDetails'),
       dispatch
     );
@@ -285,6 +306,8 @@ export function clickRelative(nodeId, topologyId, label, origin) {
     const state = getState();
     getNodeDetails(
       state.get('topologyUrlsById'),
+      state.get('currentTopologyId'),
+      activeTopologyOptionsSelector(state),
       state.get('nodeDetails'),
       dispatch
     );
@@ -313,7 +336,7 @@ export function clickShowTopologyForNode(topologyId, nodeId) {
     const state = getState();
     getNodesDelta(
       getCurrentTopologyUrl(state),
-      getActiveTopologyOptions(state),
+      activeTopologyOptionsSelector(state),
       dispatch
     );
   };
@@ -331,9 +354,16 @@ export function clickTopology(topologyId) {
     const state = getState();
     getNodesDelta(
       getCurrentTopologyUrl(state),
-      getActiveTopologyOptions(state),
+      activeTopologyOptionsSelector(state),
       dispatch
     );
+  };
+}
+
+export function cacheZoomState(zoomState) {
+  return {
+    type: ActionTypes.CACHE_ZOOM_STATE,
+    zoomState
   };
 }
 
@@ -360,7 +390,8 @@ export function doControl(nodeId, control) {
   return (dispatch) => {
     dispatch({
       type: ActionTypes.DO_CONTROL,
-      nodeId
+      nodeId,
+      control
     });
     doControlRequest(nodeId, control, dispatch);
   };
@@ -395,6 +426,10 @@ export function focusSearch() {
     dispatch({ type: ActionTypes.FOCUS_SEARCH });
     // update nodes cache to allow search across all topologies,
     // wait a second until animation is over
+    // NOTE: This will cause matching recalculation (and rerendering)
+    // of all the nodes in the topology, instead applying it only on
+    // the nodes delta. The solution would be to implement deeper
+    // search selectors with per-node caching instead of per-topology.
     setTimeout(() => {
       getAllNodes(getState, dispatch);
     }, 1200);
@@ -538,11 +573,13 @@ export function receiveTopologies(topologies) {
     const state = getState();
     getNodesDelta(
       getCurrentTopologyUrl(state),
-      getActiveTopologyOptions(state),
+      activeTopologyOptionsSelector(state),
       dispatch
     );
     getNodeDetails(
       state.get('topologyUrlsById'),
+      state.get('currentTopologyId'),
+      activeTopologyOptionsSelector(state),
       state.get('nodeDetails'),
       dispatch
     );
@@ -572,16 +609,17 @@ export function receiveControlNodeRemoved(nodeId) {
   };
 }
 
-export function receiveControlPipeFromParams(pipeId, rawTty) {
+export function receiveControlPipeFromParams(pipeId, rawTty, resizeTtyControl) {
   // TODO add nodeId
   return {
     type: ActionTypes.RECEIVE_CONTROL_PIPE,
     pipeId,
-    rawTty
+    rawTty,
+    resizeTtyControl
   };
 }
 
-export function receiveControlPipe(pipeId, nodeId, rawTty) {
+export function receiveControlPipe(pipeId, nodeId, rawTty, resizeTtyControl, control) {
   return (dispatch, getState) => {
     const state = getState();
     if (state.get('nodeDetails').last()
@@ -600,7 +638,9 @@ export function receiveControlPipe(pipeId, nodeId, rawTty) {
       type: ActionTypes.RECEIVE_CONTROL_PIPE,
       nodeId,
       pipeId,
-      rawTty
+      rawTty,
+      resizeTtyControl,
+      control
     });
 
     updateRoute(getState);
@@ -629,6 +669,16 @@ export function receiveNotFound(nodeId) {
   };
 }
 
+export function setContrastMode(enabled) {
+  return (dispatch) => {
+    loadTheme(enabled ? 'contrast' : 'normal');
+    dispatch({
+      type: ActionTypes.TOGGLE_CONTRAST_MODE,
+      enabled,
+    });
+  };
+}
+
 export function route(urlState) {
   return (dispatch, getState) => {
     dispatch({
@@ -637,16 +687,50 @@ export function route(urlState) {
     });
     // update all request workers with new options
     const state = getState();
-    getTopologies(getActiveTopologyOptions(state), dispatch);
+    getTopologies(activeTopologyOptionsSelector(state), dispatch);
     getNodesDelta(
       getCurrentTopologyUrl(state),
-      getActiveTopologyOptions(state),
+      activeTopologyOptionsSelector(state),
       dispatch
     );
     getNodeDetails(
       state.get('topologyUrlsById'),
+      state.get('currentTopologyId'),
+      activeTopologyOptionsSelector(state),
       state.get('nodeDetails'),
       dispatch
     );
+  };
+}
+
+export function resetLocalViewState() {
+  return (dispatch) => {
+    dispatch({type: ActionTypes.RESET_LOCAL_VIEW_STATE});
+    storageSet('scopeViewState', '');
+    window.location.href = window.location.href.split('#')[0];
+  };
+}
+
+export function toggleTroubleshootingMenu(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  return {
+    type: ActionTypes.TOGGLE_TROUBLESHOOTING_MENU
+  };
+}
+
+export function changeInstance() {
+  return (dispatch, getState) => {
+    dispatch({
+      type: ActionTypes.CHANGE_INSTANCE
+    });
+    updateRoute(getState);
+  };
+}
+
+export function shutdown() {
+  stopPolling();
+  teardownWebsockets();
+  return {
+    type: ActionTypes.SHUTDOWN
   };
 }

@@ -146,9 +146,8 @@ func (ad applyDecorator) Stats(rpt report.Report, dct Decorator) Stats {
 	return Stats{}
 }
 
-// ApplyDecorators returns a renderer which will apply the given decorators
-// to the child render.
-func ApplyDecorators(renderer Renderer) Renderer {
+// ApplyDecorator returns a renderer which will apply the given decorator to the child render.
+func ApplyDecorator(renderer Renderer) Renderer {
 	return applyDecorator{renderer}
 }
 
@@ -183,5 +182,18 @@ func (cr conditionalRenderer) Stats(rpt report.Report, dct Decorator) Stats {
 	if cr.Condition(rpt) {
 		return cr.Renderer.Stats(rpt, dct)
 	}
+	return Stats{}
+}
+
+// ConstantRenderer renders a fixed set of nodes
+type ConstantRenderer report.Nodes
+
+// Render implements Renderer
+func (c ConstantRenderer) Render(_ report.Report, _ Decorator) report.Nodes {
+	return report.Nodes(c)
+}
+
+// Stats implements Renderer
+func (c ConstantRenderer) Stats(_ report.Report, _ Decorator) Stats {
 	return Stats{}
 }

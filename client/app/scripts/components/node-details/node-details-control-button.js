@@ -25,4 +25,5 @@ class NodeDetailsControlButton extends React.Component {
   }
 }
 
+// Using this instead of PureComponent because of props.dispatch
 export default connect()(NodeDetailsControlButton);

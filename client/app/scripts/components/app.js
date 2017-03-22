@@ -3,27 +3,26 @@ import React from 'react';
 import { connect } from 'react-redux';
 
 import Logo from './logo';
-import Footer from './footer.js';
-import Sidebar from './sidebar.js';
+import Footer from './footer';
+import Sidebar from './sidebar';
 import HelpPanel from './help-panel';
+import TroubleshootingMenu from './troubleshooting-menu';
 import Search from './search';
-import Status from './status.js';
-import Topologies from './topologies.js';
-import TopologyOptions from './topology-options.js';
+import Status from './status';
+import Topologies from './topologies';
+import TopologyOptions from './topology-options';
 import { getApiDetails, getTopologies } from '../utils/web-api-utils';
 import { focusSearch, pinNextMetric, hitBackspace, hitEnter, hitEsc, unpinMetric,
-  selectMetric, toggleHelp, toggleGridMode } from '../actions/app-actions';
+  selectMetric, toggleHelp, toggleGridMode, shutdown } from '../actions/app-actions';
 import Details from './details';
 import Nodes from './nodes';
 import GridModeSelector from './grid-mode-selector';
 import MetricSelector from './metric-selector';
 import NetworkSelector from './networks-selector';
-import EmbeddedTerminal from './embedded-terminal';
-import { getRouter } from '../utils/router-utils';
-import DebugToolbar, { showingDebugToolbar,
-  toggleDebugToolbar } from './debug-toolbar.js';
-import { getUrlState } from '../utils/router-utils';
-import { getActiveTopologyOptions } from '../utils/topology-utils';
+import DebugToolbar, { showingDebugToolbar, toggleDebugToolbar } from './debug-toolbar';
+import { getRouter, getUrlState } from '../utils/router-utils';
+import { activeTopologyOptionsSelector } from '../selectors/topology';
+import { availableNetworksSelector } from '../selectors/node-networks';
 
 const BACKSPACE_KEY_CODE = 8;
 const ENTER_KEY_CODE = 13;
@@ -43,9 +42,10 @@ class App extends React.Component {
     window.addEventListener('keyup', this.onKeyUp);
 
     getRouter(this.props.dispatch, this.props.urlState).start({hashbang: true});
-    if (!this.props.routeSet) {
-      // dont request topologies when already done via router
-      getTopologies(this.props.activeTopologyOptions, this.props.dispatch);
+    if (!this.props.routeSet || process.env.WEAVE_CLOUD) {
+      // dont request topologies when already done via router.
+      // If running as a component, always request topologies when the app mounts.
+      getTopologies(this.props.activeTopologyOptions, this.props.dispatch, true);
     }
     getApiDetails(this.props.dispatch);
   }
@@ -53,6 +53,7 @@ class App extends React.Component {
   componentWillUnmount() {
     window.removeEventListener('keypress', this.onKeyPress);
     window.removeEventListener('keyup', this.onKeyUp);
+    this.props.dispatch(shutdown());
   }
 
   onKeyUp(ev) {
@@ -73,14 +74,13 @@ class App extends React.Component {
   }
 
   onKeyPress(ev) {
-    const { dispatch, searchFocused } = this.props;
+    const { dispatch, searchFocused, showingTerminal } = this.props;
     //
     // keyup gives 'key'
     // keypress gives 'char'
     // Distinction is important for international keyboard layouts where there
     // is often a different {key: char} mapping.
-    //
-    if (!searchFocused) {
+    if (!searchFocused && !showingTerminal) {
       keyPressLog('onKeyPress', 'keyCode', ev.keyCode, ev);
       const char = String.fromCharCode(ev.charCode);
       if (char === '<') {
@@ -103,18 +103,18 @@ class App extends React.Component {
 
   render() {
     const { gridMode, showingDetails, showingHelp, showingMetricsSelector,
-      showingNetworkSelector, showingTerminal } = this.props;
+      showingNetworkSelector, showingTroubleshootingMenu } = this.props;
     const isIframe = window !== window.top;
 
     return (
-      <div className="app">
+      <div className="scope-app">
         {showingDebugToolbar() && <DebugToolbar />}
 
         {showingHelp && <HelpPanel />}
 
-        {showingDetails && <Details />}
+        {showingTroubleshootingMenu && <TroubleshootingMenu />}
 
-        {showingTerminal && <EmbeddedTerminal />}
+        {showingDetails && <Details />}
 
         <div className="header">
           <div className="logo">
@@ -142,17 +142,19 @@ class App extends React.Component {
   }
 }
 
+
 function mapStateToProps(state) {
   return {
-    activeTopologyOptions: getActiveTopologyOptions(state),
+    activeTopologyOptions: activeTopologyOptionsSelector(state),
     gridMode: state.get('gridMode'),
     routeSet: state.get('routeSet'),
     searchFocused: state.get('searchFocused'),
     searchQuery: state.get('searchQuery'),
     showingDetails: state.get('nodeDetails').size > 0,
     showingHelp: state.get('showingHelp'),
+    showingTroubleshootingMenu: state.get('showingTroubleshootingMenu'),
     showingMetricsSelector: state.get('availableCanvasMetrics').count() > 0,
-    showingNetworkSelector: state.get('availableNetworks').count() > 0,
+    showingNetworkSelector: availableNetworksSelector(state).count() > 0,
     showingTerminal: state.get('controlPipes').size > 0,
     urlState: getUrlState(state)
   };

@@ -1,14 +1,13 @@
 package kubernetes
 
 import (
-	"io/ioutil"
-	"os"
+	"fmt"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/labels"
 
-	"github.com/weaveworks/scope/common/mtime"
+	log "github.com/Sirupsen/logrus"
+	"github.com/weaveworks/common/mtime"
 	"github.com/weaveworks/scope/probe"
 	"github.com/weaveworks/scope/probe/controls"
 	"github.com/weaveworks/scope/probe/docker"
@@ -28,19 +27,19 @@ const (
 var (
 	PodMetadataTemplates = report.MetadataTemplates{
 		State:            {ID: State, Label: "State", From: report.FromLatest, Priority: 2},
-		IP:               {ID: IP, Label: "IP", From: report.FromLatest, Priority: 3},
+		IP:               {ID: IP, Label: "IP", From: report.FromLatest, Datatype: "ip", Priority: 3},
 		report.Container: {ID: report.Container, Label: "# Containers", From: report.FromCounters, Datatype: "number", Priority: 4},
 		Namespace:        {ID: Namespace, Label: "Namespace", From: report.FromLatest, Priority: 5},
-		Created:          {ID: Created, Label: "Created", From: report.FromLatest, Priority: 6},
+		Created:          {ID: Created, Label: "Created", From: report.FromLatest, Datatype: "datetime", Priority: 6},
 	}
 
 	PodMetricTemplates = docker.ContainerMetricTemplates
 
 	ServiceMetadataTemplates = report.MetadataTemplates{
 		Namespace:  {ID: Namespace, Label: "Namespace", From: report.FromLatest, Priority: 2},
-		Created:    {ID: Created, Label: "Created", From: report.FromLatest, Priority: 3},
-		PublicIP:   {ID: PublicIP, Label: "Public IP", From: report.FromLatest, Priority: 4},
-		IP:         {ID: IP, Label: "Internal IP", From: report.FromLatest, Priority: 5},
+		Created:    {ID: Created, Label: "Created", From: report.FromLatest, Datatype: "datetime", Priority: 3},
+		PublicIP:   {ID: PublicIP, Label: "Public IP", From: report.FromLatest, Datatype: "ip", Priority: 4},
+		IP:         {ID: IP, Label: "Internal IP", From: report.FromLatest, Datatype: "ip", Priority: 5},
 		report.Pod: {ID: report.Pod, Label: "# Pods", From: report.FromCounters, Datatype: "number", Priority: 6},
 	}
 
@@ -48,7 +47,7 @@ var (
 
 	DeploymentMetadataTemplates = report.MetadataTemplates{
 		Namespace:          {ID: Namespace, Label: "Namespace", From: report.FromLatest, Priority: 2},
-		Created:            {ID: Created, Label: "Created", From: report.FromLatest, Priority: 3},
+		Created:            {ID: Created, Label: "Created", From: report.FromLatest, Datatype: "datetime", Priority: 3},
 		ObservedGeneration: {ID: ObservedGeneration, Label: "Observed Gen.", From: report.FromLatest, Priority: 4},
 		DesiredReplicas:    {ID: DesiredReplicas, Label: "Desired Replicas", From: report.FromLatest, Datatype: "number", Priority: 5},
 		report.Pod:         {ID: report.Pod, Label: "# Pods", From: report.FromCounters, Datatype: "number", Priority: 6},
@@ -59,7 +58,7 @@ var (
 
 	ReplicaSetMetadataTemplates = report.MetadataTemplates{
 		Namespace:          {ID: Namespace, Label: "Namespace", From: report.FromLatest, Priority: 2},
-		Created:            {ID: Created, Label: "Created", From: report.FromLatest, Priority: 3},
+		Created:            {ID: Created, Label: "Created", From: report.FromLatest, Datatype: "datetime", Priority: 3},
 		ObservedGeneration: {ID: ObservedGeneration, Label: "Observed Gen.", From: report.FromLatest, Priority: 4},
 		DesiredReplicas:    {ID: DesiredReplicas, Label: "Desired Replicas", From: report.FromLatest, Datatype: "number", Priority: 5},
 		report.Pod:         {ID: report.Pod, Label: "# Pods", From: report.FromCounters, Datatype: "number", Priority: 6},
@@ -68,7 +67,12 @@ var (
 	ReplicaSetMetricTemplates = PodMetricTemplates
 
 	TableTemplates = report.TableTemplates{
-		LabelPrefix: {ID: LabelPrefix, Label: "Kubernetes Labels", Prefix: LabelPrefix},
+		LabelPrefix: {
+			ID:     LabelPrefix,
+			Label:  "Kubernetes Labels",
+			Type:   report.PropertyListType,
+			Prefix: LabelPrefix,
+		},
 	}
 
 	ScalingControls = []report.Control{
@@ -95,10 +99,11 @@ type Reporter struct {
 	probe           *probe.Probe
 	hostID          string
 	handlerRegistry *controls.HandlerRegistry
+	kubeletPort     uint
 }
 
 // NewReporter makes a new Reporter
-func NewReporter(client Client, pipes controls.PipeClient, probeID string, hostID string, probe *probe.Probe, handlerRegistry *controls.HandlerRegistry) *Reporter {
+func NewReporter(client Client, pipes controls.PipeClient, probeID string, hostID string, probe *probe.Probe, handlerRegistry *controls.HandlerRegistry, kubeletPort uint) *Reporter {
 	reporter := &Reporter{
 		client:          client,
 		pipes:           pipes,
@@ -106,6 +111,7 @@ func NewReporter(client Client, pipes controls.PipeClient, probeID string, hostI
 		probe:           probe,
 		hostID:          hostID,
 		handlerRegistry: handlerRegistry,
+		kubeletPort:     kubeletPort,
 	}
 	reporter.registerControls()
 	client.WatchPods(reporter.podEvent)
@@ -284,6 +290,7 @@ func (r *Reporter) replicaSetTopology(probeID string, deployments []Deployment) 
 
 	for _, deployment := range deployments {
 		selectors = append(selectors, match(
+			deployment.Namespace(),
 			deployment.Selector(),
 			report.Deployment,
 			report.MakeDeploymentNodeID(deployment.UID()),
@@ -313,36 +320,16 @@ func (r *Reporter) replicaSetTopology(probeID string, deployments []Deployment) 
 	return result, replicaSets, err
 }
 
-// GetNodeName return the k8s node name for the current machine.
-// It is exported for testing.
-var GetNodeName = func(r *Reporter) (string, error) {
-	uuidBytes, err := ioutil.ReadFile("/sys/class/dmi/id/product_uuid")
-	if os.IsNotExist(err) {
-		uuidBytes, err = ioutil.ReadFile("/sys/hypervisor/uuid")
-	}
-	if err != nil {
-		return "", err
-	}
-	uuid := strings.Trim(string(uuidBytes), "\n")
-	nodeName := ""
-	err = r.client.WalkNodes(func(node *api.Node) error {
-		if node.Status.NodeInfo.SystemUUID == string(uuid) {
-			nodeName = node.ObjectMeta.Name
-		}
-		return nil
-	})
-	return nodeName, err
-}
-
 type labelledChild interface {
 	Labels() map[string]string
 	AddParent(string, string)
+	Namespace() string
 }
 
 // Match parses the selectors and adds the target as a parent if the selector matches.
-func match(selector labels.Selector, topology, id string) func(labelledChild) {
+func match(namespace string, selector labels.Selector, topology, id string) func(labelledChild) {
 	return func(c labelledChild) {
-		if selector.Matches(labels.Set(c.Labels())) {
+		if namespace == c.Namespace() && selector.Matches(labels.Set(c.Labels())) {
 			c.AddParent(topology, id)
 		}
 	}
@@ -370,6 +357,7 @@ func (r *Reporter) podTopology(services []Service, replicaSets []ReplicaSet) (re
 	})
 	for _, service := range services {
 		selectors = append(selectors, match(
+			service.Namespace(),
 			service.Selector(),
 			report.Service,
 			report.MakeServiceNodeID(service.UID()),
@@ -377,19 +365,31 @@ func (r *Reporter) podTopology(services []Service, replicaSets []ReplicaSet) (re
 	}
 	for _, replicaSet := range replicaSets {
 		selectors = append(selectors, match(
+			replicaSet.Namespace(),
 			replicaSet.Selector(),
 			report.ReplicaSet,
 			report.MakeReplicaSetNodeID(replicaSet.UID()),
 		))
 	}
 
-	thisNodeName, err := GetNodeName(r)
-	if err != nil {
-		return pods, err
+	// Obtain the local pods from kubelet since we only want to report those
+	// for performance reasons.
+	//
+	// In theory a simpler approach would be to obtain the current NodeName
+	// and filter local pods based on that. However that's hard since
+	// 1. reconstructing the NodeName requires cloud provider credentials
+	// 2. inferring the NodeName out of the hostname or system uuid is unreliable
+	//    (uuids and hostnames can be duplicated across the cluster).
+	localPodUIDs, errUIDs := GetLocalPodUIDs(fmt.Sprintf("localhost:%d", r.kubeletPort))
+	if errUIDs != nil {
+		log.Warnf("Cannot obtain local pods, reporting all (which may impact performance): %v", errUIDs)
 	}
-	err = r.client.WalkPods(func(p Pod) error {
-		if p.NodeName() != thisNodeName {
-			return nil
+	err := r.client.WalkPods(func(p Pod) error {
+		// filter out non-local pods
+		if errUIDs == nil {
+			if _, ok := localPodUIDs[p.UID()]; !ok {
+				return nil
+			}
 		}
 		for _, selector := range selectors {
 			selector(p)

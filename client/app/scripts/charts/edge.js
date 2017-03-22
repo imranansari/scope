@@ -3,6 +3,7 @@ import { connect } from 'react-redux';
 import classNames from 'classnames';
 
 import { enterEdge, leaveEdge } from '../actions/app-actions';
+import { NODE_BASE_SIZE } from '../constants/styles';
 
 class Edge extends React.Component {
 
@@ -13,14 +14,35 @@ class Edge extends React.Component {
   }
 
   render() {
-    const { id, path, highlighted, blurred, focused } = this.props;
-    const className = classNames('edge', {highlighted, blurred, focused});
-
+    const {
+      id,
+      path,
+      highlighted,
+      blurred,
+      focused,
+      scale,
+      source,
+      target
+    } = this.props;
+    const className = classNames('edge', { highlighted, blurred, focused });
+    const thickness = (scale * 0.01) * NODE_BASE_SIZE;
+    const strokeWidth = focused ? thickness * 3 : thickness;
+    const shouldRenderMarker = (focused || highlighted) && (source !== target);
+    // Draws the edge so that its thickness reflects the zoom scale.
+    // Edge shadow is always made 10x thicker than the edge itself.
     return (
-      <g className={className} onMouseEnter={this.handleMouseEnter}
-        onMouseLeave={this.handleMouseLeave} id={id}>
-        <path d={path} className="shadow" />
-        <path d={path} className="link" />
+      <g
+        id={id} className={className}
+        onMouseEnter={this.handleMouseEnter}
+        onMouseLeave={this.handleMouseLeave}
+      >
+        <path className="shadow" d={path} style={{ strokeWidth: 10 * strokeWidth }} />
+        <path
+          className="link"
+          d={path}
+          markerEnd={shouldRenderMarker ? 'url(#end-arrow)' : null}
+          style={{ strokeWidth }}
+        />
       </g>
     );
   }
@@ -34,7 +56,13 @@ class Edge extends React.Component {
   }
 }
 
+function mapStateToProps(state) {
+  return {
+    contrastMode: state.get('contrastMode')
+  };
+}
+
 export default connect(
-  null,
+  mapStateToProps,
   { enterEdge, leaveEdge }
 )(Edge);

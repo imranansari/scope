@@ -25,7 +25,6 @@ const (
 	UnpauseEvent           = "unpause"
 	NetworkConnectEvent    = "network:connect"
 	NetworkDisconnectEvent = "network:disconnect"
-	endpoint               = "unix:///var/run/docker.sock"
 )
 
 // Vars exported for testing.
@@ -52,19 +51,22 @@ type ContainerUpdateWatcher func(report.Node)
 
 type registry struct {
 	sync.RWMutex
-	quit            chan chan struct{}
-	interval        time.Duration
-	collectStats    bool
-	client          Client
-	pipes           controls.PipeClient
-	hostID          string
-	handlerRegistry *controls.HandlerRegistry
+	quit                   chan chan struct{}
+	interval               time.Duration
+	collectStats           bool
+	client                 Client
+	pipes                  controls.PipeClient
+	hostID                 string
+	handlerRegistry        *controls.HandlerRegistry
+	noCommandLineArguments bool
+	noEnvironmentVariables bool
 
 	watchers        []ContainerUpdateWatcher
 	containers      *radix.Tree
 	containersByPID map[int]Container
 	images          map[string]docker_client.APIImages
 	networks        []docker_client.Network
+	pipeIDToexecID  map[string]string
 }
 
 // Client interface for mocking.
@@ -85,15 +87,29 @@ type Client interface {
 	AttachToContainerNonBlocking(docker_client.AttachToContainerOptions) (docker_client.CloseWaiter, error)
 	CreateExec(docker_client.CreateExecOptions) (*docker_client.Exec, error)
 	StartExecNonBlocking(string, docker_client.StartExecOptions) (docker_client.CloseWaiter, error)
+	Stats(docker_client.StatsOptions) error
+	ResizeExecTTY(id string, height, width int) error
 }
 
 func newDockerClient(endpoint string) (Client, error) {
 	return docker_client.NewClient(endpoint)
 }
 
+// RegistryOptions are used to initialize the Registry
+type RegistryOptions struct {
+	Interval               time.Duration
+	Pipes                  controls.PipeClient
+	CollectStats           bool
+	HostID                 string
+	HandlerRegistry        *controls.HandlerRegistry
+	DockerEndpoint         string
+	NoCommandLineArguments bool
+	NoEnvironmentVariables bool
+}
+
 // NewRegistry returns a usable Registry. Don't forget to Stop it.
-func NewRegistry(interval time.Duration, pipes controls.PipeClient, collectStats bool, hostID string, handlerRegistry *controls.HandlerRegistry) (Registry, error) {
-	client, err := NewDockerClientStub(endpoint)
+func NewRegistry(options RegistryOptions) (Registry, error) {
+	client, err := NewDockerClientStub(options.DockerEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -102,14 +118,17 @@ func NewRegistry(interval time.Duration, pipes controls.PipeClient, collectStats
 		containers:      radix.New(),
 		containersByPID: map[int]Container{},
 		images:          map[string]docker_client.APIImages{},
+		pipeIDToexecID:  map[string]string{},
 
 		client:          client,
-		pipes:           pipes,
-		interval:        interval,
-		collectStats:    collectStats,
-		hostID:          hostID,
-		handlerRegistry: handlerRegistry,
+		pipes:           options.Pipes,
+		interval:        options.Interval,
+		collectStats:    options.CollectStats,
+		hostID:          options.HostID,
+		handlerRegistry: options.HandlerRegistry,
 		quit:            make(chan chan struct{}),
+		noCommandLineArguments: options.NoCommandLineArguments,
+		noEnvironmentVariables: options.NoEnvironmentVariables,
 	}
 
 	r.registerControls()
@@ -336,7 +355,7 @@ func (r *registry) updateContainerState(containerID string, intendedState *strin
 	o, ok := r.containers.Get(containerID)
 	var c Container
 	if !ok {
-		c = NewContainerStub(dockerContainer, r.hostID)
+		c = NewContainerStub(dockerContainer, r.hostID, r.noCommandLineArguments, r.noEnvironmentVariables)
 		r.containers.Insert(containerID, c)
 	} else {
 		c = o.(Container)
@@ -361,7 +380,7 @@ func (r *registry) updateContainerState(containerID string, intendedState *strin
 	// And finally, ensure we gather stats for it
 	if r.collectStats {
 		if dockerContainer.State.Running {
-			if err := c.StartGatheringStats(); err != nil {
+			if err := c.StartGatheringStats(r.client); err != nil {
 				log.Errorf("Error gathering stats for container %s: %s", containerID, err)
 				return
 			}

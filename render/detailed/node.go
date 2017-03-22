@@ -6,6 +6,7 @@ import (
 
 	"github.com/ugorji/go/codec"
 
+	"github.com/weaveworks/scope/probe/awsecs"
 	"github.com/weaveworks/scope/probe/docker"
 	"github.com/weaveworks/scope/probe/host"
 	"github.com/weaveworks/scope/probe/kubernetes"
@@ -136,8 +137,8 @@ var (
 				TopologyID: "hosts",
 				Label:      "Hosts",
 				Columns: []Column{
-					{ID: host.CPUUsage, Label: "CPU"},
-					{ID: host.MemoryUsage, Label: "Memory"},
+					{ID: host.CPUUsage, Label: "CPU", Datatype: "number"},
+					{ID: host.MemoryUsage, Label: "Memory", Datatype: "number"},
 				},
 			},
 		},
@@ -147,8 +148,8 @@ var (
 				TopologyID: "services",
 				Label:      "Services",
 				Columns: []Column{
-					{ID: report.Pod, Label: "# Pods"},
-					{ID: kubernetes.IP, Label: "IP"},
+					{ID: report.Pod, Label: "# Pods", Datatype: "number"},
+					{ID: kubernetes.IP, Label: "IP", Datatype: "ip"},
 				},
 			},
 		},
@@ -158,8 +159,8 @@ var (
 				TopologyID: "replica-sets",
 				Label:      "Replica Sets",
 				Columns: []Column{
-					{ID: report.Pod, Label: "# Pods"},
-					{ID: kubernetes.ObservedGeneration, Label: "Observed Gen."},
+					{ID: report.Pod, Label: "# Pods", Datatype: "number"},
+					{ID: kubernetes.ObservedGeneration, Label: "Observed Gen.", Datatype: "number"},
 				},
 			},
 		},
@@ -171,8 +172,29 @@ var (
 
 				Columns: []Column{
 					{ID: kubernetes.State, Label: "State"},
-					{ID: report.Container, Label: "Containers"},
-					{ID: kubernetes.IP, Label: "IP"},
+					{ID: report.Container, Label: "# Containers", Datatype: "number"},
+					{ID: kubernetes.IP, Label: "IP", Datatype: "ip"},
+				},
+			},
+		},
+		{
+			topologyID: report.ECSService,
+			NodeSummaryGroup: NodeSummaryGroup{
+				TopologyID: "ecs-services",
+				Label:      "Services",
+				Columns: []Column{
+					{ID: awsecs.ServiceRunningCount, Label: "Running", Datatype: "number"},
+					{ID: awsecs.ServiceDesiredCount, Label: "Desired", Datatype: "number"},
+				},
+			},
+		},
+		{
+			topologyID: report.ECSTask,
+			NodeSummaryGroup: NodeSummaryGroup{
+				TopologyID: "ecs-tasks",
+				Label:      "Tasks",
+				Columns: []Column{
+					{ID: awsecs.CreatedAt, Label: "Created At", Datatype: "datetime"},
 				},
 			},
 		},
@@ -181,8 +203,8 @@ var (
 			NodeSummaryGroup: NodeSummaryGroup{
 				TopologyID: "containers",
 				Label:      "Containers", Columns: []Column{
-					{ID: docker.CPUTotalUsage, Label: "CPU"},
-					{ID: docker.MemoryUsage, Label: "Memory"},
+					{ID: docker.CPUTotalUsage, Label: "CPU", Datatype: "number"},
+					{ID: docker.MemoryUsage, Label: "Memory", Datatype: "number"},
 				},
 			},
 		},
@@ -191,9 +213,9 @@ var (
 			NodeSummaryGroup: NodeSummaryGroup{
 				TopologyID: "processes",
 				Label:      "Processes", Columns: []Column{
-					{ID: process.PID, Label: "PID"},
-					{ID: process.CPUUsage, Label: "CPU"},
-					{ID: process.MemoryUsage, Label: "Memory"},
+					{ID: process.PID, Label: "PID", Datatype: "number"},
+					{ID: process.CPUUsage, Label: "CPU", Datatype: "number"},
+					{ID: process.MemoryUsage, Label: "Memory", Datatype: "number"},
 				},
 			},
 		},
@@ -203,7 +225,7 @@ var (
 				TopologyID: "containers-by-image",
 				Label:      "Container Images",
 				Columns: []Column{
-					{ID: report.Container, Label: "# Containers", DefaultSort: true},
+					{ID: report.Container, Label: "# Containers", DefaultSort: true, Datatype: "number"},
 				},
 			},
 		},

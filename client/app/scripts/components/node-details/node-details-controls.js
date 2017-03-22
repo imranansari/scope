@@ -1,5 +1,5 @@
 import React from 'react';
-import _ from 'lodash';
+import { sortBy } from 'lodash';
 
 import NodeDetailsControlButton from './node-details-control-button';
 
@@ -18,10 +18,10 @@ export default function NodeDetailsControls({controls, error, nodeId, pending}) 
         <span className="node-details-controls-error-messages">{error}</span>
       </div>}
       <span className="node-details-controls-buttons">
-        {_.sortBy(controls, 'rank').map(control => <NodeDetailsControlButton
+        {sortBy(controls, 'rank').map(control => <NodeDetailsControlButton
           nodeId={nodeId} control={control} pending={pending} key={control.id} />)}
       </span>
-      {controls && <span title="Applying..." className={spinnerClassName}></span>}
+      {controls && <span title="Applying..." className={spinnerClassName} />}
     </div>
   );
 }

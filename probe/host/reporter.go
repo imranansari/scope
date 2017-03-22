@@ -1,11 +1,13 @@
 package host
 
 import (
+	"fmt"
 	"net"
 	"runtime"
+	"sync"
 	"time"
 
-	"github.com/weaveworks/scope/common/mtime"
+	"github.com/weaveworks/common/mtime"
 	"github.com/weaveworks/scope/probe/controls"
 	"github.com/weaveworks/scope/report"
 )
@@ -52,6 +54,7 @@ var (
 
 // Reporter generates Reports containing the host topology.
 type Reporter struct {
+	sync.RWMutex
 	hostID          string
 	hostName        string
 	probeID         string
@@ -59,6 +62,7 @@ type Reporter struct {
 	pipes           controls.PipeClient
 	hostShellCmd    []string
 	handlerRegistry *controls.HandlerRegistry
+	pipeIDToTTY     map[string]uintptr
 }
 
 // NewReporter returns a Reporter which produces a report containing host
@@ -72,13 +76,14 @@ func NewReporter(hostID, hostName, probeID, version string, pipes controls.PipeC
 		version:         version,
 		hostShellCmd:    getHostShellCmd(),
 		handlerRegistry: handlerRegistry,
+		pipeIDToTTY:     map[string]uintptr{},
 	}
 	r.registerControls()
 	return r
 }
 
 // Name of this reporter, for metrics gathering
-func (Reporter) Name() string { return "Host" }
+func (*Reporter) Name() string { return "Host" }
 
 // GetLocalNetworks is exported for mocking
 var GetLocalNetworks = func() ([]*net.IPNet, error) {
@@ -116,10 +121,11 @@ func (r *Reporter) Report() (report.Report, error) {
 		return rep, err
 	}
 
-	kernel, err := GetKernelVersion()
+	kernelRelease, kernelVersion, err := GetKernelReleaseAndVersion()
 	if err != nil {
 		return rep, err
 	}
+	kernel := fmt.Sprintf("%s %s", kernelRelease, kernelVersion)
 
 	rep.Host = rep.Host.WithMetadataTemplates(MetadataTemplates)
 	rep.Host = rep.Host.WithMetricTemplates(MetricTemplates)

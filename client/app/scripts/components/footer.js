@@ -2,21 +2,24 @@ import React from 'react';
 import { connect } from 'react-redux';
 import moment from 'moment';
 
-import Plugins from './plugins.js';
+import Plugins from './plugins';
 import { getUpdateBufferSize } from '../utils/update-buffer-utils';
-import { contrastModeUrl, isContrastMode } from '../utils/contrast-utils';
 import { clickDownloadGraph, clickForceRelayout, clickPauseUpdate,
-  clickResumeUpdate, toggleHelp } from '../actions/app-actions';
-import { basePathSlash } from '../utils/web-api-utils';
+  clickResumeUpdate, toggleHelp, toggleTroubleshootingMenu, setContrastMode } from '../actions/app-actions';
 
 class Footer extends React.Component {
-  render() {
-    const { hostname, updatePausedAt, version, versionUpdate } = this.props;
-    const contrastMode = isContrastMode();
+  constructor(props, context) {
+    super(props, context);
 
-    // link url to switch contrast with current UI state
-    const otherContrastModeUrl = contrastMode
-      ? basePathSlash(window.location.pathname) : contrastModeUrl;
+    this.handleContrastClick = this.handleContrastClick.bind(this);
+  }
+  handleContrastClick(e) {
+    e.preventDefault();
+    this.props.setContrastMode(!this.props.contrastMode);
+  }
+  render() {
+    const { hostname, updatePausedAt, version, versionUpdate, contrastMode } = this.props;
+
     const otherContrastModeTitle = contrastMode
       ? 'Switch to normal contrast' : 'Switch to high contrast';
     const forceRelayoutTitle = 'Force re-layout (might reduce edge crossings, '
@@ -48,8 +51,11 @@ class Footer extends React.Component {
       <div className="footer">
 
         <div className="footer-status">
-          {versionUpdate && <a className="footer-versionupdate"
-            title={versionUpdateTitle} href={versionUpdate.downloadUrl} target="_blank">
+          {versionUpdate && <a
+            className="footer-versionupdate"
+            title={versionUpdateTitle}
+            href={versionUpdate.downloadUrl}
+            target="_blank" rel="noopener noreferrer">
             Update available: {versionUpdate.version}
           </a>}
           <span className="footer-label">Version</span>
@@ -67,25 +73,23 @@ class Footer extends React.Component {
             {pauseLabel !== '' && <span className="footer-label">{pauseLabel}</span>}
             <span className="fa fa-pause" />
           </a>
-          <a className="footer-icon" onClick={this.props.clickForceRelayout}
+          <a
+            className="footer-icon"
+            onClick={this.props.clickForceRelayout}
             title={forceRelayoutTitle}>
             <span className="fa fa-refresh" />
           </a>
-          <a className="footer-icon" onClick={this.props.clickDownloadGraph}
-            title="Save canvas as SVG (does not include search highlighting)">
-            <span className="fa fa-download" />
-          </a>
-          <a className="footer-icon" href="api/report" download title="Save raw data as JSON">
-            <span className="fa fa-code" />
-          </a>
-          <a className="footer-icon" href={otherContrastModeUrl} title={otherContrastModeTitle}>
+          <a onClick={this.handleContrastClick} className="footer-icon" title={otherContrastModeTitle}>
             <span className="fa fa-adjust" />
           </a>
-          <a className="footer-icon" href="https://gitreports.com/issue/weaveworks/scope" target="_blank" title="Report an issue">
+          <a
+            onClick={this.props.toggleTroubleshootingMenu}
+            className="footer-icon" title="Open troubleshooting menu"
+            href=""
+          >
             <span className="fa fa-bug" />
           </a>
-          <a className="footer-icon" onClick={this.props.toggleHelp}
-            title="Show help">
+          <a className="footer-icon" onClick={this.props.toggleHelp} title="Show help">
             <span className="fa fa-question" />
           </a>
         </div>
@@ -100,12 +104,20 @@ function mapStateToProps(state) {
     hostname: state.get('hostname'),
     updatePausedAt: state.get('updatePausedAt'),
     version: state.get('version'),
-    versionUpdate: state.get('versionUpdate')
+    versionUpdate: state.get('versionUpdate'),
+    contrastMode: state.get('contrastMode')
   };
 }
 
 export default connect(
   mapStateToProps,
-  { clickDownloadGraph, clickForceRelayout, clickPauseUpdate,
-    clickResumeUpdate, toggleHelp }
+  {
+    clickDownloadGraph,
+    clickForceRelayout,
+    clickPauseUpdate,
+    clickResumeUpdate,
+    toggleHelp,
+    toggleTroubleshootingMenu,
+    setContrastMode
+  }
 )(Footer);

@@ -46,6 +46,9 @@ var (
 		},
 		Spec: api.PodSpec{
 			NodeName: nodeName,
+			SecurityContext: &api.PodSecurityContext{
+				HostNetwork: true,
+			},
 		},
 	}
 	apiPod2 = api.Pod{
@@ -65,7 +68,8 @@ var (
 			},
 		},
 		Spec: api.PodSpec{
-			NodeName: nodeName,
+			NodeName:        nodeName,
+			SecurityContext: &api.PodSecurityContext{},
 		},
 	}
 	apiService1 = api.Service{
@@ -176,17 +180,21 @@ func (c mockPipeClient) PipeClose(appID, id string) error {
 }
 
 func TestReporter(t *testing.T) {
-	oldGetNodeName := kubernetes.GetNodeName
-	defer func() { kubernetes.GetNodeName = oldGetNodeName }()
-	kubernetes.GetNodeName = func(*kubernetes.Reporter) (string, error) {
-		return nodeName, nil
+	oldGetNodeName := kubernetes.GetLocalPodUIDs
+	defer func() { kubernetes.GetLocalPodUIDs = oldGetNodeName }()
+	kubernetes.GetLocalPodUIDs = func(string) (map[string]struct{}, error) {
+		uids := map[string]struct{}{
+			pod1UID: {},
+			pod2UID: {},
+		}
+		return uids, nil
 	}
 
 	pod1ID := report.MakePodNodeID(pod1UID)
 	pod2ID := report.MakePodNodeID(pod2UID)
 	serviceID := report.MakeServiceNodeID(serviceUID)
 	hr := controls.NewDefaultHandlerRegistry()
-	rpt, _ := kubernetes.NewReporter(newMockClient(), nil, "", "foo", nil, hr).Report()
+	rpt, _ := kubernetes.NewReporter(newMockClient(), nil, "", "foo", nil, hr, 0).Report()
 
 	// Reporter should have added the following pods
 	for _, pod := range []struct {
@@ -202,7 +210,7 @@ func TestReporter(t *testing.T) {
 		{pod2ID, serviceID, map[string]string{
 			kubernetes.Name:      "pong-b",
 			kubernetes.Namespace: "ping",
-			kubernetes.Created:   pod1.Created(),
+			kubernetes.Created:   pod2.Created(),
 		}},
 	} {
 		node, ok := rpt.Pod.Nodes[pod.id]
@@ -231,7 +239,7 @@ func TestReporter(t *testing.T) {
 		for k, want := range map[string]string{
 			kubernetes.Name:      "pongservice",
 			kubernetes.Namespace: "ping",
-			kubernetes.Created:   pod1.Created(),
+			kubernetes.Created:   service1.Created(),
 		} {
 			if have, ok := node.Latest.Lookup(k); !ok || have != want {
 				t.Errorf("Expected service %s latest %q: %q, got %q", serviceID, k, want, have)
@@ -247,7 +255,7 @@ func TestTagger(t *testing.T) {
 	}))
 
 	hr := controls.NewDefaultHandlerRegistry()
-	rpt, err := kubernetes.NewReporter(newMockClient(), nil, "", "", nil, hr).Tag(rpt)
+	rpt, err := kubernetes.NewReporter(newMockClient(), nil, "", "", nil, hr, 0).Tag(rpt)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -267,16 +275,16 @@ type callbackReadCloser struct {
 func (c *callbackReadCloser) Close() error { return c.close() }
 
 func TestReporterGetLogs(t *testing.T) {
-	oldGetNodeName := kubernetes.GetNodeName
-	defer func() { kubernetes.GetNodeName = oldGetNodeName }()
-	kubernetes.GetNodeName = func(*kubernetes.Reporter) (string, error) {
-		return nodeName, nil
+	oldGetNodeName := kubernetes.GetLocalPodUIDs
+	defer func() { kubernetes.GetLocalPodUIDs = oldGetNodeName }()
+	kubernetes.GetLocalPodUIDs = func(string) (map[string]struct{}, error) {
+		return map[string]struct{}{}, nil
 	}
 
 	client := newMockClient()
 	pipes := mockPipeClient{}
 	hr := controls.NewDefaultHandlerRegistry()
-	reporter := kubernetes.NewReporter(client, pipes, "", "", nil, hr)
+	reporter := kubernetes.NewReporter(client, pipes, "", "", nil, hr, 0)
 
 	// Should error on invalid IDs
 	{

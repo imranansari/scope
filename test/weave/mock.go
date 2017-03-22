@@ -25,17 +25,14 @@ func (MockClient) Status() (weave.Status, error) {
 	return weave.Status{
 		Router: weave.Router{
 			Name: MockWeavePeerName,
-			Peers: []struct {
-				Name     string
-				NickName string
-			}{
+			Peers: []weave.Peer{
 				{
 					Name:     MockWeavePeerName,
 					NickName: MockWeavePeerNickName,
 				},
 			},
 		},
-		DNS: weave.DNS{
+		DNS: &weave.DNS{
 			Entries: []struct {
 				Hostname    string
 				ContainerID string
@@ -48,8 +45,14 @@ func (MockClient) Status() (weave.Status, error) {
 				},
 			},
 		},
-		IPAM: weave.IPAM{
+		IPAM: &weave.IPAM{
 			DefaultSubnet: MockWeaveDefaultSubnet,
+			Entries: []struct {
+				Size        uint32
+				IsKnownPeer bool
+			}{
+				{Size: 0, IsKnownPeer: false},
+			},
 		},
 	}, nil
 }

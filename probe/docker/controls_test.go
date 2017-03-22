@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	commonTest "github.com/weaveworks/common/test"
 	"github.com/weaveworks/scope/common/xfer"
 	"github.com/weaveworks/scope/probe/controls"
 	"github.com/weaveworks/scope/probe/docker"
@@ -17,7 +18,10 @@ func TestControls(t *testing.T) {
 	mdc := newMockClient()
 	setupStubs(mdc, func() {
 		hr := controls.NewDefaultHandlerRegistry()
-		registry, _ := docker.NewRegistry(10*time.Second, nil, false, "", hr)
+		registry, _ := docker.NewRegistry(docker.RegistryOptions{
+			Interval:        10 * time.Second,
+			HandlerRegistry: hr,
+		})
 		defer registry.Stop()
 
 		for _, tc := range []struct{ command, result string }{
@@ -58,7 +62,10 @@ func TestPipes(t *testing.T) {
 	mdc := newMockClient()
 	setupStubs(mdc, func() {
 		hr := controls.NewDefaultHandlerRegistry()
-		registry, _ := docker.NewRegistry(10*time.Second, nil, false, "", hr)
+		registry, _ := docker.NewRegistry(docker.RegistryOptions{
+			Interval:        10 * time.Second,
+			HandlerRegistry: hr,
+		})
 		defer registry.Stop()
 
 		test.Poll(t, 100*time.Millisecond, true, func() interface{} {
@@ -66,20 +73,33 @@ func TestPipes(t *testing.T) {
 			return ok
 		})
 
-		for _, tc := range []string{
-			docker.AttachContainer,
-			docker.ExecContainer,
+		for _, want := range []struct {
+			control  string
+			response xfer.Response
+		}{
+			{
+				control: docker.AttachContainer,
+				response: xfer.Response{
+					Pipe:   "pipeid",
+					RawTTY: true,
+				},
+			},
+
+			{
+				control: docker.ExecContainer,
+				response: xfer.Response{
+					Pipe:             "pipeid",
+					RawTTY:           true,
+					ResizeTTYControl: docker.ResizeExecTTY,
+				},
+			},
 		} {
 			result := hr.HandleControlRequest(xfer.Request{
-				Control: tc,
+				Control: want.control,
 				NodeID:  report.MakeContainerNodeID("ping"),
 			})
-			want := xfer.Response{
-				Pipe:   "pipeid",
-				RawTTY: true,
-			}
-			if !reflect.DeepEqual(result, want) {
-				t.Errorf("diff %s: %s", tc, test.Diff(want, result))
+			if !reflect.DeepEqual(result, want.response) {
+				t.Errorf("diff %s: %s", want.control, commonTest.Diff(want, result))
 			}
 		}
 	})

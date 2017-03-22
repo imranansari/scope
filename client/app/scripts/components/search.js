@@ -1,13 +1,14 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
 import { connect } from 'react-redux';
 import classnames from 'classnames';
-import _ from 'lodash';
+import { debounce } from 'lodash';
 
-import { blurSearch, doSearch, focusSearch } from '../actions/app-actions';
+import { blurSearch, doSearch, focusSearch, showHelp } from '../actions/app-actions';
+import { searchMatchCountByTopologySelector } from '../selectors/search';
 import { slugify } from '../utils/string-utils';
 import { isTopologyEmpty } from '../utils/topology-utils';
 import SearchItem from './search-item';
+
 
 function shortenHintLabel(text) {
   return text
@@ -15,6 +16,7 @@ function shortenHintLabel(text) {
     .toLowerCase()
     .substr(0, 12);
 }
+
 
 // dynamic hint based on node names
 function getHint(nodes) {
@@ -38,6 +40,7 @@ function getHint(nodes) {
    Hit enter to apply the search as a filter.`;
 }
 
+
 class Search extends React.Component {
 
   constructor(props, context) {
@@ -45,7 +48,8 @@ class Search extends React.Component {
     this.handleBlur = this.handleBlur.bind(this);
     this.handleChange = this.handleChange.bind(this);
     this.handleFocus = this.handleFocus.bind(this);
-    this.doSearch = _.debounce(this.doSearch.bind(this), 200);
+    this.saveQueryInputRef = this.saveQueryInputRef.bind(this);
+    this.doSearch = debounce(this.doSearch.bind(this), 200);
     this.state = {
       value: ''
     };
@@ -78,6 +82,10 @@ class Search extends React.Component {
     this.props.doSearch(value);
   }
 
+  saveQueryInputRef(ref) {
+    this.queryInput = ref;
+  }
+
   componentWillReceiveProps(nextProps) {
     // when cleared from the outside, reset internal state
     if (this.props.searchQuery !== nextProps.searchQuery && nextProps.searchQuery === '') {
@@ -87,18 +95,18 @@ class Search extends React.Component {
 
   componentDidUpdate() {
     if (this.props.searchFocused) {
-      ReactDOM.findDOMNode(this.refs.queryInput).focus();
+      this.queryInput.focus();
     } else if (!this.state.value) {
-      ReactDOM.findDOMNode(this.refs.queryInput).blur();
+      this.queryInput.blur();
     }
   }
 
   render() {
-    const { inputId = 'search', nodes, pinnedSearches, searchFocused,
-      searchNodeMatches, searchQuery, topologiesLoaded } = this.props;
+    const { nodes, pinnedSearches, searchFocused, searchMatchCountByTopology,
+      searchQuery, topologiesLoaded, onClickHelp, inputId = 'search' } = this.props;
     const disabled = this.props.isTopologyEmpty;
-    const matchCount = searchNodeMatches
-      .reduce((count, topologyMatches) => count + topologyMatches.size, 0);
+    const matchCount = searchMatchCountByTopology
+      .reduce((count, topologyMatchCount) => count + topologyMatchCount, 0);
     const showPinnedSearches = pinnedSearches.size > 0;
     // manual clear (null) has priority, then props, then state
     const value = this.state.value === null ? '' : this.state.value || searchQuery || '';
@@ -118,19 +126,22 @@ class Search extends React.Component {
           <div className="search-input">
             {showPinnedSearches && pinnedSearches.toIndexedSeq()
               .map(query => <SearchItem query={query} key={query} />)}
-            <input className="search-input-field" type="text" id={inputId}
+            <input
+              className="search-input-field" type="text" id={inputId}
               value={value} onChange={this.handleChange}
               onFocus={this.handleFocus} onBlur={this.handleBlur}
-              disabled={disabled} ref="queryInput" />
+              disabled={disabled} ref={this.saveQueryInputRef} />
           </div>
           <div className="search-label">
-            <i className="fa fa-search search-label-icon"></i>
+            <i className="fa fa-search search-label-icon" />
             <label className="search-label-hint" htmlFor={inputId}>
               Search
             </label>
           </div>
           {!showPinnedSearches && <div className="search-hint">
-            {getHint(nodes)}
+            {getHint(nodes)} <span
+              className="search-help-link fa fa-question-circle"
+              onMouseDown={onClickHelp} />
           </div>}
         </div>
       </div>
@@ -138,15 +149,16 @@ class Search extends React.Component {
   }
 }
 
+
 export default connect(
   state => ({
     nodes: state.get('nodes'),
     isTopologyEmpty: isTopologyEmpty(state),
+    topologiesLoaded: state.get('topologiesLoaded'),
     pinnedSearches: state.get('pinnedSearches'),
     searchFocused: state.get('searchFocused'),
     searchQuery: state.get('searchQuery'),
-    searchNodeMatches: state.get('searchNodeMatches'),
-    topologiesLoaded: state.get('topologiesLoaded')
+    searchMatchCountByTopology: searchMatchCountByTopologySelector(state),
   }),
-  { blurSearch, doSearch, focusSearch }
+  { blurSearch, doSearch, focusSearch, onClickHelp: showHelp }
 )(Search);

@@ -22,6 +22,12 @@ const (
 
 	// Key added to nodes to prevent them being joined with conntracked connections
 	DoesNotMakeConnections = "does_not_make_connections"
+
+	// WeaveOverlayPeerPrefix is the prefix for weave peers in the overlay network
+	WeaveOverlayPeerPrefix = ""
+
+	// DockerOverlayPeerPrefix is the prefix for docker peers in the overlay network
+	DockerOverlayPeerPrefix = "docker_peer_"
 )
 
 // MakeEndpointNodeID produces an endpoint node ID from its composite parts.
@@ -71,6 +77,11 @@ func MakeProcessNodeID(hostID, pid string) string {
 	return hostID + ScopeDelim + pid
 }
 
+// MakeECSServiceNodeID produces an ECS Service node ID from its composite parts.
+func MakeECSServiceNodeID(cluster, serviceName string) string {
+	return cluster + ScopeDelim + serviceName
+}
+
 var (
 	// MakeHostNodeID produces a host node ID from its composite parts.
 	MakeHostNodeID = makeSingleComponentID("host")
@@ -113,6 +124,12 @@ var (
 
 	// ParseReplicaSetNodeID parses a replica set node ID
 	ParseReplicaSetNodeID = parseSingleComponentID("replica_set")
+
+	// MakeECSTaskNodeID produces a replica set node ID from its composite parts.
+	MakeECSTaskNodeID = makeSingleComponentID("ecs_task")
+
+	// ParseECSTaskNodeID parses a replica set node ID
+	ParseECSTaskNodeID = parseSingleComponentID("ecs_task")
 )
 
 // makeSingleComponentID makes a single-component node id encoder
@@ -134,9 +151,26 @@ func parseSingleComponentID(tag string) func(string) (string, bool) {
 }
 
 // MakeOverlayNodeID produces an overlay topology node ID from a router peer's
-// name, which is assumed to be globally unique.
-func MakeOverlayNodeID(peerName string) string {
-	return "#" + peerName
+// prefix and name, which is assumed to be globally unique.
+func MakeOverlayNodeID(peerPrefix, peerName string) string {
+	return "#" + peerPrefix + peerName
+}
+
+// ParseOverlayNodeID produces the overlay type and peer name.
+func ParseOverlayNodeID(id string) (overlayPrefix string, peerName string) {
+
+	if !strings.HasPrefix(id, "#") {
+		// Best we can do
+		return "", ""
+	}
+
+	id = id[1:]
+
+	if strings.HasPrefix(id, DockerOverlayPeerPrefix) {
+		return DockerOverlayPeerPrefix, id[len(DockerOverlayPeerPrefix):]
+	}
+
+	return WeaveOverlayPeerPrefix, id
 }
 
 // ParseNodeID produces the host ID and remainder (typically an address) from
@@ -165,6 +199,20 @@ func ParseAddressNodeID(addressNodeID string) (hostID, address string, ok bool) 
 	fields := strings.SplitN(addressNodeID, ScopeDelim, 2)
 	if len(fields) != 2 {
 		return "", "", false
+	}
+	return fields[0], fields[1], true
+}
+
+// ParseECSServiceNodeID produces the cluster, service name from an ECS Service node ID
+func ParseECSServiceNodeID(ecsServiceNodeID string) (cluster, serviceName string, ok bool) {
+	fields := strings.SplitN(ecsServiceNodeID, ScopeDelim, 2)
+	if len(fields) != 2 {
+		return "", "", false
+	}
+	// In previous versions, ECS Service node IDs were of form serviceName + "<ecs_service>".
+	// For backwards compatibility, we should still return a sensical serviceName for these cases.
+	if fields[1] == "<ecs_service>" {
+		return "unknown", fields[0], true
 	}
 	return fields[0], fields[1], true
 }

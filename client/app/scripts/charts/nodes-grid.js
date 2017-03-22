@@ -5,7 +5,10 @@ import { connect } from 'react-redux';
 import { List as makeList, Map as makeMap } from 'immutable';
 import NodeDetailsTable from '../components/node-details/node-details-table';
 import { clickNode, sortOrderChanged } from '../actions/app-actions';
+import { shownNodesSelector } from '../selectors/node-filters';
 
+import { CANVAS_MARGINS } from '../constants/styles';
+import { searchNodeMatchesSelector } from '../selectors/search';
 import { getNodeColor } from '../utils/color-utils';
 
 
@@ -16,7 +19,7 @@ const IGNORED_COLUMNS = ['docker_container_ports', 'docker_container_id', 'docke
 function getColumns(nodes) {
   const metricColumns = nodes
     .toList()
-    .flatMap(n => {
+    .flatMap((n) => {
       const metrics = (n.get('metrics') || makeList())
         .map(m => makeMap({ id: m.get('id'), label: m.get('label'), dataType: 'number' }));
       return metrics;
@@ -27,7 +30,7 @@ function getColumns(nodes) {
 
   const metadataColumns = nodes
     .toList()
-    .flatMap(n => {
+    .flatMap((n) => {
       const metadata = (n.get('metadata') || makeList())
         .map(m => makeMap({ id: m.get('id'), label: m.get('label'), dataType: m.get('dataType') }));
       return metadata;
@@ -39,7 +42,7 @@ function getColumns(nodes) {
 
   const relativesColumns = nodes
     .toList()
-    .flatMap(n => {
+    .flatMap((n) => {
       const metadata = (n.get('parents') || makeList())
         .map(m => makeMap({ id: m.get('topologyId'), label: m.get('topologyId') }));
       return metadata;
@@ -65,7 +68,7 @@ function renderIdCell(props) {
       <div style={iconStyle}><i className="fa fa-square" /></div>
       <div className="truncate">
         {props.label} {showSubLabel &&
-          <span className="nodes-grid-label-minor">{props.label_minor}</span>}
+          <span className="nodes-grid-label-minor">{props.labelMinor}</span>}
       </div>
     </div>
   );
@@ -89,18 +92,18 @@ class NodesGrid extends React.Component {
     this.props.clickNode(node.id, node.label, el.getBoundingClientRect());
   }
 
-  onSortChange(sortBy, sortedDesc) {
-    this.props.sortOrderChanged(sortBy, sortedDesc);
+  onSortChange(sortedBy, sortedDesc) {
+    this.props.sortOrderChanged(sortedBy, sortedDesc);
   }
 
   render() {
-    const { margins, nodes, height, gridSortBy, gridSortedDesc,
-      searchNodeMatches = makeMap(), searchQuery } = this.props;
+    const { nodes, height, gridSortedBy, gridSortedDesc,
+      searchNodeMatches, searchQuery } = this.props;
     const cmpStyle = {
       height,
-      marginTop: margins.top,
-      paddingLeft: margins.left,
-      paddingRight: margins.right,
+      marginTop: CANVAS_MARGINS.top,
+      paddingLeft: CANVAS_MARGINS.left,
+      paddingRight: CANVAS_MARGINS.right,
     };
     const tbodyHeight = height - 24 - 18;
     const className = 'scroll-body';
@@ -113,7 +116,7 @@ class NodesGrid extends React.Component {
       id: '',
       nodes: nodes
         .toList()
-        .filter(n => !searchQuery || searchNodeMatches.has(n.get('id')))
+        .filter(n => !(searchQuery && searchNodeMatches.get(n.get('id'), makeMap()).isEmpty()))
         .toJS(),
       columns: getColumns(nodes)
     };
@@ -128,7 +131,7 @@ class NodesGrid extends React.Component {
           topologyId={this.props.currentTopologyId}
           onSortChange={this.onSortChange}
           onClickRow={this.onClickRow}
-          sortBy={gridSortBy}
+          sortedBy={gridSortedBy}
           sortedDesc={gridSortedDesc}
           selectedNodeId={this.props.selectedNodeId}
           limit={1000}
@@ -142,13 +145,15 @@ class NodesGrid extends React.Component {
 
 function mapStateToProps(state) {
   return {
-    gridSortBy: state.get('gridSortBy'),
+    nodes: shownNodesSelector(state),
+    gridSortedBy: state.get('gridSortedBy'),
     gridSortedDesc: state.get('gridSortedDesc'),
     currentTopology: state.get('currentTopology'),
     currentTopologyId: state.get('currentTopologyId'),
-    searchNodeMatches: state.getIn(['searchNodeMatches', state.get('currentTopologyId')]),
+    searchNodeMatches: searchNodeMatchesSelector(state),
     searchQuery: state.get('searchQuery'),
-    selectedNodeId: state.get('selectedNodeId')
+    selectedNodeId: state.get('selectedNodeId'),
+    height: state.getIn(['viewport', 'height']),
   };
 }
 

@@ -13,7 +13,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/armon/go-metrics"
 
-	"github.com/weaveworks/scope/common/fs"
+	"github.com/weaveworks/common/fs"
 	"github.com/weaveworks/scope/common/marshal"
 	"github.com/weaveworks/scope/probe/process"
 )
@@ -110,10 +110,12 @@ func readProcessConnections(buf *bytes.Buffer, namespaceProcs []*process.Process
 			// try next process
 			continue
 		}
+		// Return after succeeding on any process
+		// (proc/PID/net/tcp and proc/PID/net/tcp6 are identical for all the processes in the same namespace)
 		return read+read6 > 0, nil
 	}
 
-	// would be cool to have an or operation between errors
+	// It would be cool to have an "or" error combinator
 	if errRead != nil {
 		return false, errRead
 	}

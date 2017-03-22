@@ -1,8 +1,6 @@
-jest.dontMock('../nodes-layout');
-jest.dontMock('../../utils/topology-utils');
-jest.dontMock('../../constants/naming'); // edge naming: 'source-target'
-
 import { fromJS, Map } from 'immutable';
+
+import { constructEdgeId as edge } from '../../utils/layouter-utils';
 
 const makeMap = Map;
 
@@ -13,7 +11,7 @@ describe('NodesLayout', () => {
     const coords = [];
     nodes
       .sortBy(node => node.get('id'))
-      .forEach(node => {
+      .forEach((node) => {
         coords.push(node.get('x'));
         coords.push(node.get('y'));
       });
@@ -34,9 +32,39 @@ describe('NodesLayout', () => {
         n4: {id: 'n4'}
       }),
       edges: fromJS({
-        'n1-n3': {id: 'n1-n3', source: 'n1', target: 'n3'},
-        'n1-n4': {id: 'n1-n4', source: 'n1', target: 'n4'},
-        'n2-n4': {id: 'n2-n4', source: 'n2', target: 'n4'}
+        [edge('n1', 'n3')]: {id: edge('n1', 'n3'), source: 'n1', target: 'n3'},
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'},
+        [edge('n2', 'n4')]: {id: edge('n2', 'n4'), source: 'n2', target: 'n4'}
+      })
+    },
+    rank4: {
+      nodes: fromJS({
+        n1: {id: 'n1', rank: 'A'},
+        n2: {id: 'n2', rank: 'A'},
+        n3: {id: 'n3', rank: 'B'},
+        n4: {id: 'n4', rank: 'B'}
+      }),
+      edges: fromJS({
+        [edge('n1', 'n3')]: {id: edge('n1', 'n3'), source: 'n1', target: 'n3'},
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'},
+        [edge('n2', 'n4')]: {id: edge('n2', 'n4'), source: 'n2', target: 'n4'}
+      })
+    },
+    rank6: {
+      nodes: fromJS({
+        n1: {id: 'n1', rank: 'A'},
+        n2: {id: 'n2', rank: 'A'},
+        n3: {id: 'n3', rank: 'B'},
+        n4: {id: 'n4', rank: 'B'},
+        n5: {id: 'n5', rank: 'A'},
+        n6: {id: 'n6', rank: 'B'},
+      }),
+      edges: fromJS({
+        [edge('n1', 'n3')]: {id: edge('n1', 'n3'), source: 'n1', target: 'n3'},
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'},
+        [edge('n1', 'n5')]: {id: edge('n1', 'n5'), source: 'n1', target: 'n5'},
+        [edge('n2', 'n4')]: {id: edge('n2', 'n4'), source: 'n2', target: 'n4'},
+        [edge('n2', 'n6')]: {id: edge('n2', 'n6'), source: 'n2', target: 'n6'},
       })
     },
     removeEdge24: {
@@ -47,8 +75,8 @@ describe('NodesLayout', () => {
         n4: {id: 'n4'}
       }),
       edges: fromJS({
-        'n1-n3': {id: 'n1-n3', source: 'n1', target: 'n3'},
-        'n1-n4': {id: 'n1-n4', source: 'n1', target: 'n4'}
+        [edge('n1', 'n3')]: {id: edge('n1', 'n3'), source: 'n1', target: 'n3'},
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'}
       })
     },
     removeNode2: {
@@ -58,8 +86,8 @@ describe('NodesLayout', () => {
         n4: {id: 'n4'}
       }),
       edges: fromJS({
-        'n1-n3': {id: 'n1-n3', source: 'n1', target: 'n3'},
-        'n1-n4': {id: 'n1-n4', source: 'n1', target: 'n4'}
+        [edge('n1', 'n3')]: {id: edge('n1', 'n3'), source: 'n1', target: 'n3'},
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'}
       })
     },
     removeNode23: {
@@ -68,7 +96,7 @@ describe('NodesLayout', () => {
         n4: {id: 'n4'}
       }),
       edges: fromJS({
-        'n1-n4': {id: 'n1-n4', source: 'n1', target: 'n4'}
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'}
       })
     },
     single3: {
@@ -88,12 +116,28 @@ describe('NodesLayout', () => {
         n5: {id: 'n5'}
       }),
       edges: fromJS({
-        'n1-n4': {id: 'n1-n4', source: 'n1', target: 'n4'}
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'}
+      })
+    },
+    singlePortrait6: {
+      nodes: fromJS({
+        n1: {id: 'n1'},
+        n2: {id: 'n2'},
+        n3: {id: 'n3'},
+        n4: {id: 'n4'},
+        n5: {id: 'n5'},
+        n6: {id: 'n6'}
+      }),
+      edges: fromJS({
+        [edge('n1', 'n4')]: {id: edge('n1', 'n4'), source: 'n1', target: 'n4'}
       })
     }
   };
 
   beforeEach(() => {
+    // clear feature flags
+    window.localStorage.clear();
+
     options = {
       nodeCache: makeMap(),
       edgeCache: makeMap()
@@ -270,7 +314,9 @@ describe('NodesLayout', () => {
   it('renders single nodes next to portrait graph', () => {
     const result = NodesLayout.doLayout(
       nodeSets.singlePortrait.nodes,
-      nodeSets.singlePortrait.edges);
+      nodeSets.singlePortrait.edges,
+      { noCache: true }
+    );
 
     nodes = result.nodes.toJS();
 
@@ -285,5 +331,80 @@ describe('NodesLayout', () => {
     expect(nodes.n1.x).toBeLessThan(nodes.n3.x);
     expect(nodes.n1.x).toBeLessThan(nodes.n5.x);
     expect(nodes.n2.x).toEqual(nodes.n5.x);
+  });
+
+  it('renders an additional single node in single nodes group', () => {
+    let result = NodesLayout.doLayout(
+      nodeSets.singlePortrait.nodes,
+      nodeSets.singlePortrait.edges,
+      { noCache: true }
+    );
+
+    nodes = result.nodes.toJS();
+
+    // first square row on same level as top-most other node
+    expect(nodes.n1.y).toEqual(nodes.n2.y);
+    expect(nodes.n1.y).toEqual(nodes.n3.y);
+    expect(nodes.n4.y).toEqual(nodes.n5.y);
+
+    // all singles right to other nodes
+    expect(nodes.n1.x).toEqual(nodes.n4.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n2.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n3.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n5.x);
+    expect(nodes.n2.x).toEqual(nodes.n5.x);
+
+    options.cachedLayout = result;
+    options.nodeCache = options.nodeCache.merge(result.nodes);
+    options.edgeCache = options.edgeCache.merge(result.edge);
+
+    result = NodesLayout.doLayout(
+      nodeSets.singlePortrait6.nodes,
+      nodeSets.singlePortrait6.edges,
+      options
+    );
+
+    nodes = result.nodes.toJS();
+
+    expect(nodes.n1.x).toBeLessThan(nodes.n2.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n3.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n5.x);
+    expect(nodes.n1.x).toBeLessThan(nodes.n6.x);
+  });
+
+  it('adds a new node to existing layout in a line', () => {
+    // feature flag
+    window.localStorage.setItem('scope-experimental:layout-dance', true);
+
+    let result = NodesLayout.doLayout(
+      nodeSets.rank4.nodes,
+      nodeSets.rank4.edges,
+      { noCache: true }
+    );
+
+    nodes = result.nodes.toJS();
+
+    coords = getNodeCoordinates(result.nodes);
+    options.cachedLayout = result;
+    options.nodeCache = options.nodeCache.merge(result.nodes);
+    options.edgeCache = options.edgeCache.merge(result.edge);
+
+    expect(NodesLayout.hasNewNodesOfExistingRank(
+      nodeSets.rank6.nodes,
+      nodeSets.rank6.edges,
+      result.nodes)).toBeTruthy();
+
+    result = NodesLayout.doLayout(
+      nodeSets.rank6.nodes,
+      nodeSets.rank6.edges,
+      options
+    );
+
+    nodes = result.nodes.toJS();
+
+    expect(nodes.n5.x).toBeGreaterThan(nodes.n1.x);
+    expect(nodes.n5.y).toEqual(nodes.n1.y);
+    expect(nodes.n6.x).toBeGreaterThan(nodes.n3.x);
+    expect(nodes.n6.y).toEqual(nodes.n3.y);
   });
 });

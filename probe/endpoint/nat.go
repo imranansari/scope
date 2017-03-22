@@ -49,14 +49,15 @@ func toMapping(f flow) *endpointMapping {
 // applyNAT duplicates Nodes in the endpoint topology of a report, based on
 // the NAT table.
 func (n natMapper) applyNAT(rpt report.Report, scope string) {
-	n.flowWalker.walkFlows(func(f flow) {
-		var (
-			mapping          = toMapping(f)
-			realEndpointID   = report.MakeEndpointNodeID(scope, "", mapping.originalIP, strconv.Itoa(mapping.originalPort))
-			copyEndpointPort = strconv.Itoa(mapping.rewrittenPort)
-			copyEndpointID   = report.MakeEndpointNodeID(scope, "", mapping.rewrittenIP, copyEndpointPort)
-			node, ok         = rpt.Endpoint.Nodes[realEndpointID]
-		)
+	n.flowWalker.walkFlows(func(f flow, active bool) {
+		mapping := toMapping(f)
+
+		realEndpointPort := strconv.Itoa(mapping.originalPort)
+		copyEndpointPort := strconv.Itoa(mapping.rewrittenPort)
+		realEndpointID := report.MakeEndpointNodeID(scope, "", mapping.originalIP, realEndpointPort)
+		copyEndpointID := report.MakeEndpointNodeID(scope, "", mapping.rewrittenIP, copyEndpointPort)
+
+		node, ok := rpt.Endpoint.Nodes[realEndpointID]
 		if !ok {
 			return
 		}
@@ -66,6 +67,5 @@ func (n natMapper) applyNAT(rpt report.Report, scope string) {
 			Port:      copyEndpointPort,
 			"copy_of": realEndpointID,
 		}))
-
 	})
 }

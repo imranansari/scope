@@ -1,32 +1,42 @@
-import _ from 'lodash';
 import React from 'react';
-import { connect } from 'react-redux';
-import d3 from 'd3';
+import { omit } from 'lodash';
 import { Motion, spring } from 'react-motion';
 
+import { NODES_SPRING_ANIMATION_CONFIG } from '../constants/animation';
 import Node from './node';
 
-class NodeContainer extends React.Component {
+
+const transformedNode = (otherProps, { x, y, k, opacity }) => (
+  // NOTE: Controlling blurring and transform from here seems to re-render
+  // faster than adding a CSS class and controlling it from there.
+  <g transform={`translate(${x},${y}) scale(${k})`} style={{opacity}}>
+    <Node {...otherProps} />
+  </g>
+);
+
+export default class NodeContainer extends React.PureComponent {
   render() {
-    const { dx, dy, focused, layoutPrecision, zoomScale } = this.props;
-    const animConfig = [80, 20]; // stiffness, damping
-    const scaleFactor = focused ? (1 / zoomScale) : 1;
-    const other = _.omit(this.props, 'dx', 'dy');
+    const { dx, dy, isAnimated, scale, blurred, contrastMode } = this.props;
+    const nodeBlurOpacity = contrastMode ? 0.6 : 0.25;
+    const forwardedProps = omit(this.props, 'dx', 'dy', 'isAnimated', 'scale', 'blurred');
+    const opacity = blurred ? nodeBlurOpacity : 1;
+
+    if (!isAnimated) {
+      // Show static node for optimized rendering
+      return transformedNode(forwardedProps, { x: dx, y: dy, k: scale, opacity });
+    }
 
     return (
-      <Motion style={{
-        x: spring(dx, animConfig),
-        y: spring(dy, animConfig),
-        f: spring(scaleFactor, animConfig)
-      }}>
-        {interpolated => {
-          const transform = `translate(${d3.round(interpolated.x, layoutPrecision)},`
-            + `${d3.round(interpolated.y, layoutPrecision)})`;
-          return <Node {...other} transform={transform} scaleFactor={interpolated.f} />;
-        }}
+      // Animate the node if the layout is sufficiently small
+      <Motion
+        style={{
+          x: spring(dx, NODES_SPRING_ANIMATION_CONFIG),
+          y: spring(dy, NODES_SPRING_ANIMATION_CONFIG),
+          k: spring(scale, NODES_SPRING_ANIMATION_CONFIG),
+          opacity: spring(opacity, NODES_SPRING_ANIMATION_CONFIG),
+        }}>
+        {interpolated => transformedNode(forwardedProps, interpolated)}
       </Motion>
     );
   }
 }
-
-export default connect()(NodeContainer);

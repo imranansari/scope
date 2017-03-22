@@ -1,7 +1,6 @@
 package render
 
 import (
-	"net"
 	"regexp"
 	"strings"
 
@@ -74,8 +73,8 @@ func ShortLivedConnectionJoin(r Renderer, toIPs func(report.Node) []string) Rend
 			return report.Nodes{}
 		}
 
-		// Propagate the internet pseudo node
-		if strings.HasSuffix(n.ID, TheInternetID) {
+		// Propagate the internet and service pseudo nodes
+		if strings.HasSuffix(n.ID, TheInternetID) || strings.HasPrefix(n.ID, ServiceNodeIDPrefix) {
 			return report.Nodes{n.ID: n}
 		}
 
@@ -111,9 +110,9 @@ func ShortLivedConnectionJoin(r Renderer, toIPs func(report.Node) []string) Rend
 		if !ok {
 			return report.Nodes{}
 		}
-		if ip := net.ParseIP(addr); ip != nil && !local.Contains(ip) {
-			node := theInternetNode(m)
-			return report.Nodes{node.ID: node}
+
+		if externalNode, ok := NewDerivedExternalNode(m, addr, local); ok {
+			return report.Nodes{externalNode.ID: externalNode}
 		}
 
 		// We also allow for joining on ip:port pairs.  This is useful
@@ -192,6 +191,8 @@ func (r containerWithImageNameRenderer) Render(rpt report.Report, dct Decorator)
 		imageNodeID := report.MakeContainerImageNodeID(imageNameWithoutVersion)
 
 		c = propagateLatest(docker.ImageName, image, c)
+		c = propagateLatest(docker.ImageSize, image, c)
+		c = propagateLatest(docker.ImageVirtualSize, image, c)
 		c = propagateLatest(docker.ImageLabelPrefix+"works.weave.role", image, c)
 		c.Parents = c.Parents.
 			Delete(report.ContainerImage).
@@ -203,7 +204,7 @@ func (r containerWithImageNameRenderer) Render(rpt report.Report, dct Decorator)
 
 // ContainerWithImageNameRenderer is a Renderer which produces a container
 // graph where the ranks are the image names, not their IDs
-var ContainerWithImageNameRenderer = ApplyDecorators(containerWithImageNameRenderer{ContainerRenderer})
+var ContainerWithImageNameRenderer = containerWithImageNameRenderer{ContainerRenderer}
 
 // ContainerImageRenderer is a Renderer which produces a renderable container
 // image graph by merging the container graph and the container image topology.

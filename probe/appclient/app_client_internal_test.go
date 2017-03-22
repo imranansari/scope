@@ -13,9 +13,9 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/ugorji/go/codec"
+	"github.com/weaveworks/common/test"
 	"github.com/weaveworks/scope/common/xfer"
 	"github.com/weaveworks/scope/report"
-	"github.com/weaveworks/scope/test"
 )
 
 func dummyServer(t *testing.T, expectedToken, expectedID string, expectedVersion string, expectedReport report.Report, done chan struct{}) *httptest.Server {
@@ -83,6 +83,8 @@ func TestAppClientPublish(t *testing.T) {
 	rpt.ReplicaSet = report.MakeTopology()
 	rpt.Host = report.MakeTopology()
 	rpt.Overlay = report.MakeTopology()
+	rpt.ECSTask = report.MakeTopology()
+	rpt.ECSService = report.MakeTopology()
 	rpt.Endpoint.Controls = nil
 	rpt.Process.Controls = nil
 	rpt.Container.Controls = nil
@@ -93,6 +95,8 @@ func TestAppClientPublish(t *testing.T) {
 	rpt.ReplicaSet.Controls = nil
 	rpt.Host.Controls = nil
 	rpt.Overlay.Controls = nil
+	rpt.ECSTask.Controls = nil
+	rpt.ECSService.Controls = nil
 
 	s := dummyServer(t, token, id, version, rpt, done)
 	defer s.Close()
@@ -109,7 +113,11 @@ func TestAppClientPublish(t *testing.T) {
 		Insecure:     false,
 	}
 
-	p, err := NewAppClient(pc, u.Host, s.URL, nil)
+	url, err := url.Parse(s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewAppClient(pc, u.Host, *url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +166,11 @@ func TestAppClientDetails(t *testing.T) {
 		ProbeID:  "",
 		Insecure: false,
 	}
-	p, err := NewAppClient(pc, u.Host, s.URL, nil)
+	url, err := url.Parse(s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewAppClient(pc, u.Host, *url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +215,11 @@ func TestStop(t *testing.T) {
 		Insecure: false,
 	}
 
-	p, err := NewAppClient(pc, u.Host, s.URL, nil)
+	url, err := url.Parse(s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewAppClient(pc, u.Host, *url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

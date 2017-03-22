@@ -1,6 +1,6 @@
-import _ from 'lodash';
-import d3 from 'd3';
-
+import { zipObject } from 'lodash';
+import { scaleLinear } from 'd3-scale';
+import { extent } from 'd3-array';
 
 // Inspired by Lee Byron's test data generator.
 /*eslint-disable */
@@ -20,7 +20,7 @@ function bumpLayer(n, maxValue) {
   for (i = 0; i < n; ++i) a[i] = 0;
   for (i = 0; i < 5; ++i) bump(a);
   const values = a.map(function(d) { return Math.max(0, d * maxValue); });
-  const s = d3.scale.linear().domain(d3.extent(values)).range([0, maxValue]);
+  const s = scaleLinear().domain(extent(values)).range([0, maxValue]);
   return values.map(s);
 }
 /*eslint-enable */
@@ -104,10 +104,9 @@ function mergeMetrics(node) {
     return node;
   }
   return Object.assign({}, node, {
-    metrics: _(metrics[node.shape])
+    metrics: (metrics[node.shape] || [])
       .map((fn, name) => [name, fn(node)])
       .fromPairs()
-      .value()
   });
 }
 
@@ -121,7 +120,7 @@ function handleAdd(nodes) {
 
 
 function handleUpdated(updatedNodes, prevNodes) {
-  const modifiedNodesIndex = _.zipObject((updatedNodes || []).map(n => [n.id, n]));
+  const modifiedNodesIndex = zipObject((updatedNodes || []).map(n => [n.id, n]));
   return prevNodes.toIndexedSeq().toJS().map(n => (
     Object.assign({}, mergeMetrics(n), modifiedNodesIndex[n.id])
   ));

@@ -1,63 +1,49 @@
 package docker_test
 
 import (
-	"bufio"
-	"io"
-	"io/ioutil"
 	"net"
-	"net/http"
+	"strings"
 	"testing"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	client "github.com/fsouza/go-dockerclient"
-	"github.com/ugorji/go/codec"
 
-	"github.com/weaveworks/scope/common/mtime"
+	"github.com/weaveworks/common/mtime"
 	"github.com/weaveworks/scope/probe/docker"
 	"github.com/weaveworks/scope/report"
 	"github.com/weaveworks/scope/test"
 	"github.com/weaveworks/scope/test/reflect"
 )
 
-type mockConnection struct {
-	reader *io.PipeReader
+type mockStatsGatherer struct {
+	opts  client.StatsOptions
+	ready chan bool
 }
 
-func (c *mockConnection) Do(req *http.Request) (resp *http.Response, err error) {
-	return &http.Response{
-		Body: c.reader,
-	}, nil
+func newMockStatsGatherer() *mockStatsGatherer {
+	return &mockStatsGatherer{ready: make(chan bool)}
 }
 
-func (c *mockConnection) Close() error {
-	return c.reader.Close()
+func (s *mockStatsGatherer) Stats(opts client.StatsOptions) error {
+	s.opts = opts
+	close(s.ready)
+	return nil
+}
+
+func (s *mockStatsGatherer) Send(stats *client.Stats) {
+	<-s.ready
+	s.opts.Stats <- stats
 }
 
 func TestContainer(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-
-	oldDialStub, oldNewClientConnStub := docker.DialStub, docker.NewClientConnStub
-	defer func() { docker.DialStub, docker.NewClientConnStub = oldDialStub, oldNewClientConnStub }()
-
-	docker.DialStub = func(network, address string) (net.Conn, error) {
-		return nil, nil
-	}
-
-	reader, writer := io.Pipe()
-	connection := &mockConnection{reader}
-
-	docker.NewClientConnStub = func(c net.Conn, r *bufio.Reader) docker.ClientConn {
-		return connection
-	}
-
 	now := time.Unix(12345, 67890).UTC()
 	mtime.NowForce(now)
 	defer mtime.NowReset()
 
 	const hostID = "scope"
-	c := docker.NewContainer(container1, hostID)
-	err := c.StartGatheringStats()
+	c := docker.NewContainer(container1, hostID, false, false)
+	s := newMockStatsGatherer()
+	err := c.StartGatheringStats(s)
 	if err != nil {
 		t.Errorf("%v", err)
 	}
@@ -68,10 +54,7 @@ func TestContainer(t *testing.T) {
 	stats.Read = now
 	stats.MemoryStats.Usage = 12345
 	stats.MemoryStats.Limit = 45678
-	encoder := codec.NewEncoder(writer, &codec.JsonHandle{})
-	if err = encoder.Encode(&stats); err != nil {
-		t.Error(err)
-	}
+	s.Send(stats)
 
 	// Now see if we go them
 	{
@@ -87,16 +70,17 @@ func TestContainer(t *testing.T) {
 			docker.RemoveContainer:  {Dead: true},
 		}
 		want := report.MakeNodeWith("ping;<container>", map[string]string{
-			"docker_container_command":     " ",
-			"docker_container_created":     "01 Jan 01 00:00 UTC",
+			"docker_container_command":     "ping foo.bar.local",
+			"docker_container_created":     "0001-01-01T00:00:00Z",
 			"docker_container_id":          "ping",
 			"docker_container_name":        "pong",
 			"docker_image_id":              "baz",
 			"docker_label_foo1":            "bar1",
 			"docker_label_foo2":            "bar2",
 			"docker_container_state":       "running",
-			"docker_container_state_human": "Up 6 years",
+			"docker_container_state_human": c.Container().State.String(),
 			"docker_container_uptime":      uptime.String(),
+			"docker_env_FOO":               "secret-bar",
 		}).WithLatestControls(
 			controls,
 		).WithMetrics(report.Metrics{
@@ -142,4 +126,40 @@ func TestContainer(t *testing.T) {
 	if have := docker.ExtractContainerIPs(node); !reflect.DeepEqual(have, []string{"1.2.3.4", "5.6.7.8"}) {
 		t.Errorf("%v != %v", have, []string{"1.2.3.4", "5.6.7.8"})
 	}
+}
+
+func TestContainerHidingArgs(t *testing.T) {
+	const hostID = "scope"
+	c := docker.NewContainer(container1, hostID, true, false)
+	node := c.GetNode()
+	node.Latest.ForEach(func(k string, _ time.Time, v string) {
+		if strings.Contains(v, "foo.bar.local") {
+			t.Errorf("Found command line argument in node")
+		}
+	})
+}
+
+func TestContainerHidingEnv(t *testing.T) {
+	const hostID = "scope"
+	c := docker.NewContainer(container1, hostID, false, true)
+	node := c.GetNode()
+	node.Latest.ForEach(func(k string, _ time.Time, v string) {
+		if strings.Contains(v, "secret-bar") {
+			t.Errorf("Found environment variable in node")
+		}
+	})
+}
+
+func TestContainerHidingBoth(t *testing.T) {
+	const hostID = "scope"
+	c := docker.NewContainer(container1, hostID, true, true)
+	node := c.GetNode()
+	node.Latest.ForEach(func(k string, _ time.Time, v string) {
+		if strings.Contains(v, "foo.bar.local") {
+			t.Errorf("Found command line argument in node")
+		}
+		if strings.Contains(v, "secret-bar") {
+			t.Errorf("Found environment variable in node")
+		}
+	})
 }

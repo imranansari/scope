@@ -17,19 +17,22 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tylerb/graceful"
 	"github.com/weaveworks/go-checkpoint"
 	"github.com/weaveworks/weave/common"
 
+	billing "github.com/weaveworks/billing-client"
+	"github.com/weaveworks/common/middleware"
+	"github.com/weaveworks/common/network"
 	"github.com/weaveworks/scope/app"
 	"github.com/weaveworks/scope/app/multitenant"
-	"github.com/weaveworks/scope/common/middleware"
-	"github.com/weaveworks/scope/common/network"
 	"github.com/weaveworks/scope/common/weave"
 	"github.com/weaveworks/scope/probe/docker"
 )
 
 const (
 	memcacheUpdateInterval = 1 * time.Minute
+	httpTimeout            = 90 * time.Second
 )
 
 var (
@@ -43,10 +46,11 @@ var (
 
 func init() {
 	prometheus.MustRegister(requestDuration)
+	billing.MustRegisterMetrics()
 }
 
 // Router creates the mux for all the various app components.
-func router(collector app.Collector, controlRouter app.ControlRouter, pipeRouter app.PipeRouter) http.Handler {
+func router(collector app.Collector, controlRouter app.ControlRouter, pipeRouter app.PipeRouter, externalUI bool) http.Handler {
 	router := mux.NewRouter().SkipClean(true)
 
 	// We pull in the http.DefaultServeMux to get the pprof routes
@@ -58,7 +62,7 @@ func router(collector app.Collector, controlRouter app.ControlRouter, pipeRouter
 	app.RegisterPipeRoutes(router, pipeRouter)
 	app.RegisterTopologyRoutes(router, collector)
 
-	uiHandler := http.FileServer(FS(false))
+	uiHandler := http.FileServer(GetFS(externalUI))
 	router.PathPrefix("/ui").Name("static").Handler(
 		middleware.PathRewrite(regexp.MustCompile("^/ui"), "").Wrap(
 			uiHandler))
@@ -98,7 +102,7 @@ func collectorFactory(userIDer multitenant.UserIDer, collectorURL, s3URL, natsHo
 
 	switch parsed.Scheme {
 	case "file":
-		return app.NewFileCollector(parsed.Path)
+		return app.NewFileCollector(parsed.Path, window)
 	case "dynamodb":
 		s3, err := url.Parse(s3URL)
 		if err != nil {
@@ -151,6 +155,19 @@ func collectorFactory(userIDer multitenant.UserIDer, collectorURL, s3URL, natsHo
 	}
 
 	return nil, fmt.Errorf("Invalid collector '%s'", collectorURL)
+}
+
+func emitterFactory(collector app.Collector, clientCfg billing.Config, userIDer multitenant.UserIDer, emitterCfg multitenant.BillingEmitterConfig) (*multitenant.BillingEmitter, error) {
+	billingClient, err := billing.NewClient(clientCfg)
+	if err != nil {
+		return nil, err
+	}
+	emitterCfg.UserIDer = userIDer
+	return multitenant.NewBillingEmitter(
+		collector,
+		billingClient,
+		emitterCfg,
+	)
 }
 
 func controlRouterFactory(userIDer multitenant.UserIDer, controlRouterURL string) (app.ControlRouter, error) {
@@ -228,6 +245,16 @@ func appMain(flags appFlags) {
 		return
 	}
 
+	if flags.BillingEmitterConfig.Enabled {
+		billingEmitter, err := emitterFactory(collector, flags.BillingClientConfig, userIDer, flags.BillingEmitterConfig)
+		if err != nil {
+			log.Fatalf("Error creating emitter: %v", err)
+			return
+		}
+		defer billingEmitter.Close()
+		collector = billingEmitter
+	}
+
 	controlRouter, err := controlRouterFactory(userIDer, flags.controlRouterURL)
 	if err != nil {
 		log.Fatalf("Error creating control router: %v", err)
@@ -244,6 +271,7 @@ func appMain(flags appFlags) {
 	checkpoint.CheckInterval(&checkpoint.CheckParams{
 		Product: "scope-app",
 		Version: app.Version,
+		Flags:   makeBaseCheckpointFlags(),
 	}, versionCheckPeriod, func(r *checkpoint.CheckResponse, err error) {
 		if err != nil {
 			log.Errorf("Error checking version: %v", err)
@@ -266,16 +294,36 @@ func appMain(flags appFlags) {
 		}
 	}
 
-	handler := router(collector, controlRouter, pipeRouter)
+	handler := router(collector, controlRouter, pipeRouter, flags.externalUI)
 	if flags.logHTTP {
-		handler = middleware.Logging.Wrap(handler)
+		handler = middleware.Log{
+			LogRequestHeaders: flags.logHTTPHeaders,
+		}.Wrap(handler)
+	}
+
+	server := &graceful.Server{
+		// we want to manage the stop condition ourselves below
+		NoSignalHandling: true,
+		Server: &http.Server{
+			Addr:           flags.listen,
+			Handler:        handler,
+			ReadTimeout:    httpTimeout,
+			WriteTimeout:   httpTimeout,
+			MaxHeaderBytes: 1 << 20,
+		},
 	}
 	go func() {
 		log.Infof("listening on %s", flags.listen)
-		log.Info(http.ListenAndServe(flags.listen, handler))
+		if err := server.ListenAndServe(); err != nil {
+			log.Error(err)
+		}
 	}()
 
+	// block until INT/TERM
 	common.SignalHandlerLoop()
+	// stop listening, wait for any active connections to finish
+	server.Stop(flags.stopTimeout)
+	<-server.StopChan()
 }
 
 func newWeavePublisher(dockerEndpoint, weaveAddr, weaveHostname, containerName string) (*app.WeavePublisher, error) {

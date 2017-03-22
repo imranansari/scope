@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weaveworks/scope/common/exec"
+	"github.com/weaveworks/common/exec"
+	"github.com/weaveworks/common/test"
+	testExec "github.com/weaveworks/common/test/exec"
 	"github.com/weaveworks/scope/common/weave"
-	"github.com/weaveworks/scope/test"
-	testExec "github.com/weaveworks/scope/test/exec"
 )
 
 const (
@@ -64,17 +64,14 @@ func TestStatus(t *testing.T) {
 
 	want := weave.Status{
 		Router: weave.Router{
-			Peers: []struct {
-				Name     string
-				NickName string
-			}{
+			Peers: []weave.Peer{
 				{
 					Name:     mockWeavePeerName,
 					NickName: mockWeavePeerNickName,
 				},
 			},
 		},
-		DNS: weave.DNS{
+		DNS: &weave.DNS{
 			Entries: []struct {
 				Hostname    string
 				ContainerID string

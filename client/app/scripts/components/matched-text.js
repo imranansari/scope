@@ -1,5 +1,4 @@
 import React from 'react';
-import { connect } from 'react-redux';
 
 const TRUNCATE_CONTEXT = 6;
 const TRUNCATE_ELLIPSIS = '…';
@@ -79,18 +78,22 @@ function truncateChunks(chunks, text, maxLength) {
  * `match` is a text match object of shape `{start, length}`
  * that delimit text matches in `text`. `label` shows the origin of the text.
  */
-class MatchedText extends React.Component {
-
+export default class MatchedText extends React.PureComponent {
   render() {
-    const { match, text, maxLength } = this.props;
+    const { match, text, truncate, maxLength } = this.props;
+
+    const showFullValue = !truncate || (match && (match.start + match.length) > truncate);
+    const displayText = showFullValue ? text : text.slice(0, truncate);
 
     if (!match) {
-      return <span>{text}</span>;
+      return <span>{displayText}</span>;
     }
+
+    const chunks = chunkText(displayText, match);
 
     return (
       <span className="matched-text" title={text}>
-        {truncateChunks(chunkText(text, match), text, maxLength).map((chunk, index) => {
+        {truncateChunks(chunks, displayText, maxLength).map((chunk, index) => {
           if (chunk.match) {
             return (
               <span className="match" key={index}>
@@ -104,5 +107,3 @@ class MatchedText extends React.Component {
     );
   }
 }
-
-export default connect()(MatchedText);

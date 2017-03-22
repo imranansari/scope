@@ -1,14 +1,26 @@
-import _ from 'lodash';
+/* eslint-disable import/no-webpack-loader-syntax, import/no-unresolved */
 import debug from 'debug';
+import { size, each, includes } from 'lodash';
 import { fromJS, is as isDeepEqual, List as makeList, Map as makeMap,
   OrderedMap as makeOrderedMap, Set as makeSet } from 'immutable';
 
 import ActionTypes from '../constants/action-types';
 import { EDGE_ID_SEPARATOR } from '../constants/naming';
-import { applyPinnedSearches, updateNodeMatches } from '../utils/search-utils';
-import { getNetworkNodes, getAvailableNetworks } from '../utils/network-view-utils';
-import { findTopologyById, getAdjacentNodes, setTopologyUrlsById,
-  updateTopologyIds, filterHiddenTopologies, addTopologyFullname } from '../utils/topology-utils';
+import {
+  graphExceedsComplexityThreshSelector,
+  activeTopologyZoomCacheKeyPathSelector,
+} from '../selectors/topology';
+import { applyPinnedSearches } from '../utils/search-utils';
+import { getNetworkNodes } from '../utils/network-view-utils';
+import {
+  findTopologyById,
+  getAdjacentNodes,
+  setTopologyUrlsById,
+  updateTopologyIds,
+  filterHiddenTopologies,
+  addTopologyFullname,
+  getDefaultTopology,
+} from '../utils/topology-utils';
 
 const log = debug('scope:app-store');
 const error = debug('scope:error');
@@ -22,18 +34,22 @@ const topologySorter = topology => topology.get('rank');
 export const initialState = makeMap({
   availableCanvasMetrics: makeList(),
   availableNetworks: makeList(),
+  contrastMode: false,
   controlPipes: makeOrderedMap(), // pipeId -> controlPipe
   controlStatus: makeMap(),
   currentTopology: null,
-  currentTopologyId: 'containers',
+  currentTopologyId: null,
   errorUrl: null,
+  exportingGraph: false,
   forceRelayout: false,
   gridMode: false,
-  gridSortBy: null,
-  gridSortedDesc: true,
+  gridSortedBy: null,
+  gridSortedDesc: null,
+  // TODO: Calculate these sets from selectors instead.
   highlightedEdgeIds: makeSet(),
   highlightedNodeIds: makeSet(),
   hostname: '...',
+  initialNodesLoaded: false,
   mouseOverEdgeId: null,
   mouseOverNodeId: null,
   networkNodes: makeMap(),
@@ -51,12 +67,12 @@ export const initialState = makeMap({
   pinnedSearches: makeList(), // list of node filters
   routeSet: false,
   searchFocused: false,
-  searchNodeMatches: makeMap(),
   searchQuery: null,
   selectedMetric: null,
   selectedNetwork: null,
   selectedNodeId: null,
   showingHelp: false,
+  showingTroubleshootingMenu: false,
   showingNetworks: false,
   topologies: makeList(),
   topologiesLoaded: false,
@@ -65,8 +81,9 @@ export const initialState = makeMap({
   updatePausedAt: null, // Date
   version: '...',
   versionUpdate: null,
+  viewport: makeMap(),
   websocketClosed: false,
-  exportingGraph: false
+  zoomCache: makeMap(),
 });
 
 // adds ID field to topology (based on last part of URL path) and save urls in
@@ -94,7 +111,7 @@ function setTopology(state, topologyId) {
 }
 
 function setDefaultTopologyOptions(state, topologyList) {
-  topologyList.forEach(topology => {
+  topologyList.forEach((topology) => {
     let defaultOptions = makeOrderedMap();
     if (topology.has('options') && topology.get('options')) {
       topology.get('options').forEach((option) => {
@@ -139,6 +156,12 @@ function resumeUpdate(state) {
   return state.set('updatePausedAt', null);
 }
 
+function clearNodes(state) {
+  return state
+    .update('nodes', nodes => nodes.clear())
+    .set('nodesLoaded', false);
+}
+
 export function rootReducer(state = initialState, action) {
   if (!action.type) {
     error('Payload missing a type!', action);
@@ -156,7 +179,7 @@ export function rootReducer(state = initialState, action) {
       if (topology) {
         const topologyId = topology.get('parentId') || topology.get('id');
         if (state.getIn(['topologyOptions', topologyId, action.option]) !== action.value) {
-          state = state.update('nodes', nodes => nodes.clear());
+          state = clearNodes(state);
         }
         state = state.setIn(
           ['topologyOptions', topologyId, action.option],
@@ -166,13 +189,20 @@ export function rootReducer(state = initialState, action) {
       return state;
     }
 
+    case ActionTypes.SET_VIEWPORT_DIMENSIONS: {
+      return state.mergeIn(['viewport'], {
+        width: action.width,
+        height: action.height,
+      });
+    }
+
     case ActionTypes.SET_EXPORTING_GRAPH: {
       return state.set('exportingGraph', action.exporting);
     }
 
     case ActionTypes.SORT_ORDER_CHANGED: {
       return state.merge({
-        gridSortBy: action.sortBy,
+        gridSortedBy: action.sortedBy,
         gridSortedDesc: action.sortedDesc,
       });
     }
@@ -181,11 +211,22 @@ export function rootReducer(state = initialState, action) {
       return state.setIn(['gridMode'], action.enabled);
     }
 
+    case ActionTypes.CACHE_ZOOM_STATE: {
+      return state.setIn(activeTopologyZoomCacheKeyPathSelector(state), action.zoomState);
+    }
+
     case ActionTypes.CLEAR_CONTROL_ERROR: {
       return state.removeIn(['controlStatus', action.nodeId, 'error']);
     }
 
     case ActionTypes.CLICK_BACKGROUND: {
+      if (state.get('showingHelp')) {
+        state = state.set('showingHelp', false);
+      }
+
+      if (state.get('showingTroubleshootingMenu')) {
+        state = state.set('showingTroubleshootingMenu', false);
+      }
       return closeAllNodeDetails(state);
     }
 
@@ -198,6 +239,10 @@ export function rootReducer(state = initialState, action) {
     }
 
     case ActionTypes.CLICK_FORCE_RELAYOUT: {
+      if (action.forceRelayout) {
+        // Reset the zoom cache when forcing relayout.
+        state = state.deleteIn(activeTopologyZoomCacheKeyPathSelector(state));
+      }
       return state.set('forceRelayout', action.forceRelayout);
     }
 
@@ -226,7 +271,7 @@ export function rootReducer(state = initialState, action) {
     }
 
     case ActionTypes.CLICK_PAUSE_UPDATE: {
-      return state.set('updatePausedAt', new Date);
+      return state.set('updatePausedAt', new Date());
     }
 
     case ActionTypes.CLICK_RELATIVE: {
@@ -262,9 +307,10 @@ export function rootReducer(state = initialState, action) {
 
       if (action.topologyId !== state.get('currentTopologyId')) {
         state = setTopology(state, action.topologyId);
-        state = state.update('nodes', nodes => nodes.clear());
+        state = clearNodes(state);
       }
       state = state.set('availableCanvasMetrics', makeList());
+
       return state;
     }
 
@@ -274,8 +320,9 @@ export function rootReducer(state = initialState, action) {
 
       if (action.topologyId !== state.get('currentTopologyId')) {
         state = setTopology(state, action.topologyId);
-        state = state.update('nodes', nodes => nodes.clear());
+        state = clearNodes(state);
       }
+
       state = state.set('availableCanvasMetrics', makeList());
       return state;
     }
@@ -361,21 +408,23 @@ export function rootReducer(state = initialState, action) {
     }
 
     case ActionTypes.DO_SEARCH: {
-      state = state.set('searchQuery', action.searchQuery);
-      return updateNodeMatches(state);
+      return state.set('searchQuery', action.searchQuery);
     }
 
     case ActionTypes.ENTER_EDGE: {
       // highlight adjacent nodes
-      state = state.update('highlightedNodeIds', highlightedNodeIds => {
+      state = state.update('highlightedNodeIds', (highlightedNodeIds) => {
         highlightedNodeIds = highlightedNodeIds.clear();
         return highlightedNodeIds.union(action.edgeId.split(EDGE_ID_SEPARATOR));
       });
 
       // highlight edge
-      state = state.update('highlightedEdgeIds', highlightedEdgeIds => {
+      state = state.update('highlightedEdgeIds', (highlightedEdgeIds) => {
         highlightedEdgeIds = highlightedEdgeIds.clear();
-        return highlightedEdgeIds.add(action.edgeId);
+        highlightedEdgeIds = highlightedEdgeIds.add(action.edgeId);
+        const opposite = action.edgeId.split(EDGE_ID_SEPARATOR).reverse().join(EDGE_ID_SEPARATOR);
+        highlightedEdgeIds = highlightedEdgeIds.add(opposite);
+        return highlightedEdgeIds;
       });
 
       return state;
@@ -388,18 +437,18 @@ export function rootReducer(state = initialState, action) {
       state = state.set('mouseOverNodeId', nodeId);
 
       // highlight adjacent nodes
-      state = state.update('highlightedNodeIds', highlightedNodeIds => {
+      state = state.update('highlightedNodeIds', (highlightedNodeIds) => {
         highlightedNodeIds = highlightedNodeIds.clear();
         highlightedNodeIds = highlightedNodeIds.add(nodeId);
         return highlightedNodeIds.union(adjacentNodes);
       });
 
       // highlight edge
-      state = state.update('highlightedEdgeIds', highlightedEdgeIds => {
+      state = state.update('highlightedEdgeIds', (highlightedEdgeIds) => {
         highlightedEdgeIds = highlightedEdgeIds.clear();
         if (adjacentNodes.size > 0) {
           // all neighbour combinations because we dont know which direction exists
-          highlightedEdgeIds = highlightedEdgeIds.union(adjacentNodes.flatMap((adjacentId) => [
+          highlightedEdgeIds = highlightedEdgeIds.union(adjacentNodes.flatMap(adjacentId => [
             [adjacentId, nodeId].join(EDGE_ID_SEPARATOR),
             [nodeId, adjacentId].join(EDGE_ID_SEPARATOR)
           ]));
@@ -448,10 +497,9 @@ export function rootReducer(state = initialState, action) {
     }
 
     case ActionTypes.PIN_SEARCH: {
-      state = state.set('searchQuery', '');
-      state = updateNodeMatches(state);
       const pinnedSearches = state.get('pinnedSearches');
       state = state.setIn(['pinnedSearches', pinnedSearches.size], action.query);
+      state = state.set('searchQuery', '');
       return applyPinnedSearches(state);
     }
 
@@ -463,7 +511,9 @@ export function rootReducer(state = initialState, action) {
       return state.setIn(['controlPipes', action.pipeId], makeOrderedMap({
         id: action.pipeId,
         nodeId: action.nodeId,
-        raw: action.rawTty
+        raw: action.rawTty,
+        resizeTtyControl: action.resizeTtyControl,
+        control: action.control
       }));
     }
 
@@ -486,7 +536,7 @@ export function rootReducer(state = initialState, action) {
 
       // disregard if node is not selected anymore
       if (state.hasIn(['nodeDetails', action.details.id])) {
-        state = state.updateIn(['nodeDetails', action.details.id], obj => {
+        state = state.updateIn(['nodeDetails', action.details.id], (obj) => {
           const result = Object.assign({}, obj);
           result.notFound = false;
           result.details = action.details;
@@ -497,6 +547,14 @@ export function rootReducer(state = initialState, action) {
     }
 
     case ActionTypes.SET_RECEIVED_NODES_DELTA: {
+      // Turn on the table view if the graph is too complex, but skip
+      // this block if the user has already loaded topologies once.
+      if (!state.get('initialNodesLoaded') && !state.get('nodesLoaded')) {
+        state = graphExceedsComplexityThreshSelector(state)
+          ? state.set('gridMode', true)
+          : state;
+        state = state.set('initialNodesLoaded', true);
+      }
       return state.set('nodesLoaded', true);
     }
 
@@ -506,56 +564,43 @@ export function rootReducer(state = initialState, action) {
 
       if (!emptyMessage) {
         log('RECEIVE_NODES_DELTA',
-          'remove', _.size(action.delta.remove),
-          'update', _.size(action.delta.update),
-          'add', _.size(action.delta.add));
+          'remove', size(action.delta.remove),
+          'update', size(action.delta.update),
+          'add', size(action.delta.add));
       }
 
       state = state.set('errorUrl', null);
 
       // nodes that no longer exist
-      _.each(action.delta.remove, (nodeId) => {
+      each(action.delta.remove, (nodeId) => {
         // in case node disappears before mouseleave event
         if (state.get('mouseOverNodeId') === nodeId) {
           state = state.set('mouseOverNodeId', null);
         }
-        if (state.hasIn(['nodes', nodeId]) && _.includes(state.get('mouseOverEdgeId'), nodeId)) {
+        if (state.hasIn(['nodes', nodeId]) && includes(state.get('mouseOverEdgeId'), nodeId)) {
           state = state.set('mouseOverEdgeId', null);
         }
         state = state.deleteIn(['nodes', nodeId]);
       });
 
       // update existing nodes
-      _.each(action.delta.update, (node) => {
+      each(action.delta.update, (node) => {
         if (state.hasIn(['nodes', node.id])) {
-          state = state.updateIn(['nodes', node.id], n => n.merge(fromJS(node)));
+          // TODO: Implement a manual deep update here, as it might bring a great benefit
+          // to our nodes selectors (e.g. layout engine would be completely bypassed if the
+          // adjacencies would stay the same but the metrics would get updated).
+          state = state.setIn(['nodes', node.id], fromJS(node));
         }
       });
 
       // add new nodes
-      _.each(action.delta.add, (node) => {
+      each(action.delta.add, (node) => {
         state = state.setIn(['nodes', node.id], fromJS(node));
       });
 
       // apply pinned searches, filters nodes that dont match
       state = applyPinnedSearches(state);
-
-      // TODO move this setting of networks as toplevel node field to backend,
-      // to not rely on field IDs here. should be determined by topology implementer
-      state = state.update('nodes', nodes => nodes.map(node => {
-        if (node.has('metadata')) {
-          const networks = node.get('metadata')
-            .find(field => field.get('id') === 'docker_container_networks');
-          if (networks) {
-            return node.set('networks', fromJS(
-              networks.get('value').split(', ').map(n => ({id: n, label: n, colorKey: n}))));
-          }
-        }
-        return node;
-      }));
-
-      state = state.set('networkNodes', getNetworkNodes(state.get('nodes')));
-      state = state.set('availableNetworks', getAvailableNetworks(state.get('nodes')));
+      state = state.set('networkNodes', getNetworkNodes(state));
 
       state = state.set('availableCanvasMetrics', state.get('nodes')
         .valueSeq()
@@ -577,23 +622,17 @@ export function rootReducer(state = initialState, action) {
         state = state.set('selectedMetric', state.get('pinnedMetric'));
       }
 
-      // update nodes cache and search results
-      state = state.setIn(['nodesByTopology', state.get('currentTopologyId')], state.get('nodes'));
-      state = updateNodeMatches(state);
-
-      return state;
+      // update nodes cache
+      return state.setIn(['nodesByTopology', state.get('currentTopologyId')], state.get('nodes'));
     }
 
     case ActionTypes.RECEIVE_NODES_FOR_TOPOLOGY: {
-      // not sure if mergeDeep() brings any benefit here
-      state = state.setIn(['nodesByTopology', action.topologyId], fromJS(action.nodes));
-      state = updateNodeMatches(state);
-      return state;
+      return state.setIn(['nodesByTopology', action.topologyId], fromJS(action.nodes));
     }
 
     case ActionTypes.RECEIVE_NOT_FOUND: {
       if (state.hasIn(['nodeDetails', action.nodeId])) {
-        state = state.updateIn(['nodeDetails', action.nodeId], obj => {
+        state = state.updateIn(['nodeDetails', action.nodeId], (obj) => {
           const result = Object.assign({}, obj);
           result.notFound = true;
           return result;
@@ -606,6 +645,11 @@ export function rootReducer(state = initialState, action) {
       state = state.set('errorUrl', null);
       state = state.update('topologyUrlsById', topologyUrlsById => topologyUrlsById.clear());
       state = processTopologies(state, action.topologies);
+      const currentTopologyId = state.get('currentTopologyId');
+      if (!currentTopologyId || !findTopologyById(state.get('topologies'), currentTopologyId)) {
+        state = state.set('currentTopologyId', getDefaultTopology(state.get('topologies')));
+        log(`Set currentTopologyId to ${state.get('currentTopologyId')}`);
+      }
       state = setTopology(state, state.get('currentTopologyId'));
       // only set on first load, if options are not already set via route
       if (!state.get('topologiesLoaded') && state.get('topologyOptions').size === 0) {
@@ -632,7 +676,7 @@ export function rootReducer(state = initialState, action) {
       state = state.set('pinnedSearches', makeList(action.state.pinnedSearches));
       state = state.set('searchQuery', action.state.searchQuery || '');
       if (state.get('currentTopologyId') !== action.state.topologyId) {
-        state = state.update('nodes', nodes => nodes.clear());
+        state = clearNodes(state);
       }
       state = setTopology(state, action.state.topologyId);
       state = setDefaultTopologyOptions(state, state.get('topologies'));
@@ -641,8 +685,8 @@ export function rootReducer(state = initialState, action) {
         pinnedMetricType: action.state.pinnedMetricType
       });
       state = state.set('gridMode', action.state.topologyViewMode === 'grid');
-      if (action.state.gridSortBy) {
-        state = state.set('gridSortBy', action.state.gridSortBy);
+      if (action.state.gridSortedBy) {
+        state = state.set('gridSortedBy', action.state.gridSortedBy);
       }
       if (action.state.gridSortedDesc !== undefined) {
         state = state.set('gridSortedDesc', action.state.gridSortedDesc);
@@ -685,6 +729,24 @@ export function rootReducer(state = initialState, action) {
 
     case ActionTypes.DEBUG_TOOLBAR_INTERFERING: {
       return action.fn(state);
+    }
+
+    case ActionTypes.TOGGLE_TROUBLESHOOTING_MENU: {
+      return state.set('showingTroubleshootingMenu', !state.get('showingTroubleshootingMenu'));
+    }
+
+    case ActionTypes.CHANGE_INSTANCE: {
+      state = closeAllNodeDetails(state);
+      return state;
+    }
+
+    case ActionTypes.TOGGLE_CONTRAST_MODE: {
+      return state.set('contrastMode', action.enabled);
+    }
+
+    case ActionTypes.SHUTDOWN: {
+      state = clearNodes(state);
+      return state.set('nodesLoaded', false);
     }
 
     default: {

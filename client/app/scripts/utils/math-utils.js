@@ -11,7 +11,6 @@
 // modulo(0, 5) => 0
 // modulo(-1, 5) => 4
 // modulo(-2, 5) => 3
-// modulo(-2, 5) => 3
 // modulo(-3, 5) => 2
 // modulo(-4, 5) => 1
 // modulo(-5, 5) => 0
@@ -19,4 +18,3 @@
 export function modulo(i, n) {
   return ((i % n) + n) % n;
 }
-

@@ -1,9 +1,8 @@
 import React from 'react';
-import d3 from 'd3';
+import { isoParse as parseDate } from 'd3-time-format';
 import { OrderedMap } from 'immutable';
 
 const makeOrderedMap = OrderedMap;
-const parseDate = d3.time.format.iso.parse;
 const sortDate = (v, d) => d;
 const DEFAULT_TICK_INTERVAL = 1000; // DEFAULT_TICK_INTERVAL + renderTime < 1000ms
 const WINDOW_LENGTH = 60;
@@ -148,8 +147,13 @@ export default ComposedComponent => class extends React.Component {
       .filter(dateFilter);
 
     const lastValue = samples.length > 0 ? samples[samples.length - 1].value : null;
-    const slidingWindow = {first: movingFirstDate,
-      last: movingLastDate, max, samples, value: lastValue};
+    const slidingWindow = {
+      first: movingFirstDate,
+      last: movingLastDate,
+      value: lastValue,
+      samples,
+      max
+    };
 
     return <ComposedComponent {...this.props} {...slidingWindow} />;
   }

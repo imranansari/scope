@@ -43,7 +43,7 @@ func (m meta) Namespace() string {
 }
 
 func (m meta) Created() string {
-	return m.ObjectMeta.CreationTimestamp.Format(time.RFC822)
+	return m.ObjectMeta.CreationTimestamp.Format(time.RFC3339Nano)
 }
 
 func (m meta) Labels() map[string]string {
@@ -56,5 +56,5 @@ func (m meta) MetaNode(id string) report.Node {
 		Name:      m.Name(),
 		Namespace: m.Namespace(),
 		Created:   m.Created(),
-	}).AddTable(LabelPrefix, m.Labels())
+	}).AddPrefixPropertyList(LabelPrefix, m.Labels())
 }

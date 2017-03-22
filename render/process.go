@@ -1,8 +1,6 @@
 package render
 
 import (
-	"net"
-
 	"github.com/weaveworks/scope/probe/docker"
 	"github.com/weaveworks/scope/probe/endpoint"
 	"github.com/weaveworks/scope/probe/process"
@@ -11,13 +9,10 @@ import (
 
 // Constants are used in the tests.
 const (
-	TheInternetID      = "theinternet"
-	IncomingInternetID = "in-" + TheInternetID
-	OutgoingInternetID = "out-" + TheInternetID
-	InboundMajor       = "The Internet"
-	OutboundMajor      = "The Internet"
-	InboundMinor       = "Inbound connections"
-	OutboundMinor      = "Outbound connections"
+	InboundMajor  = "The Internet"
+	OutboundMajor = "The Internet"
+	InboundMinor  = "Inbound connections"
+	OutboundMinor = "Outbound connections"
 
 	// Topology for pseudo-nodes and IPs so we can differentiate them at the end
 	Pseudo = "pseudo"
@@ -28,18 +23,18 @@ func renderProcesses(rpt report.Report) bool {
 }
 
 // EndpointRenderer is a Renderer which produces a renderable endpoint graph.
-var EndpointRenderer = FilterNonProcspied(SelectEndpoint)
+var EndpointRenderer = FilterNonProcspiedNorEBPF(SelectEndpoint)
 
 // ProcessRenderer is a Renderer which produces a renderable process
 // graph by merging the endpoint graph and the process topology.
 var ProcessRenderer = ConditionalRenderer(renderProcesses,
-	ApplyDecorators(ColorConnected(MakeReduce(
+	ColorConnected(MakeReduce(
 		MakeMap(
 			MapEndpoint2Process,
 			EndpointRenderer,
 		),
 		SelectProcess,
-	))),
+	)),
 )
 
 // processWithContainerNameRenderer is a Renderer which produces a process
@@ -87,24 +82,18 @@ var ProcessNameRenderer = ConditionalRenderer(renderProcesses,
 
 // MapEndpoint2Pseudo makes internet of host pesudo nodes from a endpoint node.
 func MapEndpoint2Pseudo(n report.Node, local report.Networks) report.Nodes {
-	var node report.Node
-
 	addr, ok := n.Latest.Lookup(endpoint.Addr)
 	if !ok {
 		return report.Nodes{}
 	}
 
-	if ip := net.ParseIP(addr); ip != nil && !local.Contains(ip) {
-		// If the dstNodeAddr is not in a network local to this report, we emit an
-		// internet node
-		node = theInternetNode(n)
-	} else {
-		// due to https://github.com/weaveworks/scope/issues/1323 we are dropping
-		// all non-internet pseudo nodes for now.
-		// node = NewDerivedPseudoNode(MakePseudoNodeID(addr), n)
-		return report.Nodes{}
+	if externalNode, ok := NewDerivedExternalNode(n, addr, local); ok {
+		return report.Nodes{externalNode.ID: externalNode}
 	}
-	return report.Nodes{node.ID: node}
+
+	// due to https://github.com/weaveworks/scope/issues/1323 we are dropping
+	// all non-external pseudo nodes for now.
+	return report.Nodes{}
 }
 
 // MapEndpoint2Process maps endpoint Nodes to process
@@ -155,12 +144,4 @@ func MapProcess2Name(n report.Node, _ report.Networks) report.Nodes {
 	node.Latest = node.Latest.Set(process.Name, timestamp, name)
 	node.Counters = node.Counters.Add(n.Topology, 1)
 	return report.Nodes{name: node}
-}
-
-func theInternetNode(m report.Node) report.Node {
-	// emit one internet node for incoming, one for outgoing
-	if len(m.Adjacency) > 0 {
-		return NewDerivedPseudoNode(IncomingInternetID, m)
-	}
-	return NewDerivedPseudoNode(OutgoingInternetID, m)
 }

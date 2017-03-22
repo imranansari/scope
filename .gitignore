@@ -8,6 +8,7 @@ _obj
 _test
 .vagrant
 releases
+tmp
 
 # Architecture specific extensions/prefixes
 *.[568vq]
@@ -38,11 +39,14 @@ tags
 .*.uptodate
 .uptodate
 scope.tar
+cloud-agent.tar
 .pkg
 prog/scope
 docker/scope
 docker/docker.tgz
+docker/docker
 docker/weave
+docker/weaveutil
 docker/runsvinit
 extras/fixprobe/fixprobe
 extras/fixprobe/*.json
@@ -50,6 +54,9 @@ extras/fixprobe/*.json
 *sublime-workspace
 *npm-debug.log
 app/static.go
-prog/static.go
 vendor/github.com/ugorji/go/codec/codecgen/bin/*
 *.codecgen.go
+client/build-external/*
+prog/staticui/*
+prog/externalui/*
+client/build-pkg

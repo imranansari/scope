@@ -1,7 +1,3 @@
-jest.dontMock('../search-utils');
-jest.dontMock('../string-utils');
-jest.dontMock('../../constants/naming'); // edge naming: 'source-target'
-
 import { fromJS } from 'immutable';
 
 const SearchUtils = require('../search-utils').testable;
@@ -33,10 +29,51 @@ describe('SearchUtils', () => {
         }],
         tables: [{
           id: 'metric1',
+          type: 'property-list',
+          rows: [{
+            id: 'label1',
+            entries: {
+              label: 'Label 1',
+              value: 'Label Value 1'
+            }
+          }, {
+            id: 'label2',
+            entries: {
+              label: 'Label 2',
+              value: 'Label Value 2'
+            }
+          }]
+        }, {
+          id: 'metric2',
+          type: 'multicolumn-table',
+          columns: [{
+            id: 'a',
+            label: 'A'
+          }, {
+            id: 'c',
+            label: 'C'
+          }],
           rows: [{
             id: 'row1',
-            label: 'Row 1',
-            value: 'Row Value 1'
+            entries: {
+              a: 'xxxa',
+              b: 'yyya',
+              c: 'zzz1'
+            }
+          }, {
+            id: 'row2',
+            entries: {
+              a: 'yyyb',
+              b: 'xxxb',
+              c: 'zzz2'
+            }
+          }, {
+            id: 'row3',
+            entries: {
+              a: 'Value 1',
+              b: 'Value 2',
+              c: 'Value 3'
+            }
           }]
         }],
       },
@@ -76,7 +113,7 @@ describe('SearchUtils', () => {
     it('should filter nodes that do not match a pinned searches', () => {
       let nextState = fromJS({
         nodes: nodeSets.someNodes,
-        pinnedSearches: ['row']
+        pinnedSearches: ['Label Value 1']
       });
       nextState = fun(nextState);
       expect(nextState.get('nodes').filter(node => node.get('filtered')).size).toEqual(1);
@@ -158,7 +195,7 @@ describe('SearchUtils', () => {
     const fun = SearchUtils.makeRegExp;
 
     it('should make a regexp from any string', () => {
-      expect(fun().source).toEqual((new RegExp).source);
+      expect(fun().source).toEqual((new RegExp()).source);
       expect(fun('que').source).toEqual((new RegExp('que')).source);
       // invalid string
       expect(fun('que[').source).toEqual((new RegExp('que\\[')).source);
@@ -240,61 +277,31 @@ describe('SearchUtils', () => {
       expect(matches.getIn(['n1', 'metrics', 'metric1']).metric).toBeTruthy();
     });
 
-    it('should match on a tables field', () => {
+    it('should match on a property list value', () => {
       const nodes = nodeSets.someNodes;
-      const matches = fun(nodes, {query: 'Row Value 1'});
-      expect(matches.size).toEqual(1);
-      expect(matches.getIn(['n2', 'tables', 'row1']).text).toBe('Row Value 1');
-    });
-  });
-
-  describe('updateNodeMatches', () => {
-    const fun = SearchUtils.updateNodeMatches;
-
-    it('should return no matches on an empty topology', () => {
-      let nextState = fromJS({
-        nodesByTopology: {},
-        searchNodeMatches: {},
-        searchQuery: ''
-      });
-      nextState = fun(nextState);
-      expect(nextState.get('searchNodeMatches').size).toEqual(0);
+      const matches = fun(nodes, {query: 'Value 1'});
+      expect(matches.size).toEqual(2);
+      expect(matches.getIn(['n2', 'property-lists']).size).toEqual(1);
+      expect(matches.getIn(['n2', 'property-lists', 'label1']).text).toBe('Label Value 1');
     });
 
-    it('should return no matches when no query is present', () => {
-      let nextState = fromJS({
-        nodesByTopology: {topo1: nodeSets.someNodes},
-        searchNodeMatches: {},
-        searchQuery: ''
-      });
-      nextState = fun(nextState);
-      expect(nextState.get('searchNodeMatches').size).toEqual(0);
-    });
-
-    it('should return no matches when query matches nothing', () => {
-      let nextState = fromJS({
-        nodesByTopology: {topo1: nodeSets.someNodes},
-        searchNodeMatches: {},
-        searchQuery: 'cantmatch'
-      });
-      nextState = fun(nextState);
-      expect(nextState.get('searchNodeMatches').size).toEqual(0);
-    });
-
-    it('should return a matches when a query matches something', () => {
-      let nextState = fromJS({
-        nodesByTopology: {topo1: nodeSets.someNodes},
-        searchNodeMatches: {},
-        searchQuery: 'value 2'
-      });
-      nextState = fun(nextState);
-      expect(nextState.get('searchNodeMatches').size).toEqual(1);
-      expect(nextState.get('searchNodeMatches').get('topo1').size).toEqual(1);
-
-      // then clear up again
-      nextState = nextState.set('searchQuery', '');
-      nextState = fun(nextState);
-      expect(nextState.get('searchNodeMatches').size).toEqual(0);
+    it('should match on a generic table values', () => {
+      const nodes = nodeSets.someNodes;
+      const matches1 = fun(nodes, {query: 'xx'}).getIn(['n2', 'tables']);
+      const matches2 = fun(nodes, {query: 'yy'}).getIn(['n2', 'tables']);
+      const matches3 = fun(nodes, {query: 'zz'}).getIn(['n2', 'tables']);
+      const matches4 = fun(nodes, {query: 'a'}).getIn(['n2', 'tables']);
+      expect(matches1.size).toEqual(1);
+      expect(matches2.size).toEqual(1);
+      expect(matches3.size).toEqual(2);
+      expect(matches4.size).toEqual(3);
+      expect(matches1.get('row1_a').text).toBe('xxxa');
+      expect(matches2.get('row2_a').text).toBe('yyyb');
+      expect(matches3.get('row1_c').text).toBe('zzz1');
+      expect(matches3.get('row2_c').text).toBe('zzz2');
+      expect(matches4.get('row1_a').text).toBe('xxxa');
+      expect(matches4.get('row3_a').text).toBe('Value 1');
+      expect(matches4.get('row3_c').text).toBe('Value 3');
     });
   });
 });

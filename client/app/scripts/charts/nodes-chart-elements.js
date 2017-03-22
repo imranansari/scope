@@ -3,20 +3,43 @@ import { connect } from 'react-redux';
 
 import NodesChartEdges from './nodes-chart-edges';
 import NodesChartNodes from './nodes-chart-nodes';
+import { graphExceedsComplexityThreshSelector } from '../selectors/topology';
+import {
+  selectedScaleSelector,
+  layoutNodesSelector,
+  layoutEdgesSelector
+} from '../selectors/nodes-chart-layout';
+
 
 class NodesChartElements extends React.Component {
   render() {
-    const props = this.props;
+    const { layoutNodes, layoutEdges, selectedScale, transform, isAnimated } = this.props;
+
     return (
-      <g className="nodes-chart-elements" transform={props.transform}>
-        <NodesChartEdges layoutEdges={props.layoutEdges}
-          layoutPrecision={props.layoutPrecision} />
-        <NodesChartNodes layoutNodes={props.layoutNodes} nodeScale={props.nodeScale}
-          scale={props.scale} selectedNodeScale={props.selectedNodeScale}
-          layoutPrecision={props.layoutPrecision} />
+      <g className="nodes-chart-elements" transform={transform}>
+        <NodesChartEdges
+          layoutEdges={layoutEdges}
+          selectedScale={selectedScale}
+          isAnimated={isAnimated} />
+        <NodesChartNodes
+          layoutNodes={layoutNodes}
+          selectedScale={selectedScale}
+          isAnimated={isAnimated} />
       </g>
     );
   }
 }
 
-export default connect()(NodesChartElements);
+
+function mapStateToProps(state) {
+  return {
+    layoutNodes: layoutNodesSelector(state),
+    layoutEdges: layoutEdgesSelector(state),
+    selectedScale: selectedScaleSelector(state),
+    isAnimated: !graphExceedsComplexityThreshSelector(state),
+  };
+}
+
+export default connect(
+  mapStateToProps
+)(NodesChartElements);
